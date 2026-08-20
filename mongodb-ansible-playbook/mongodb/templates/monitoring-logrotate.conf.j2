@@ -1,0 +1,13 @@
+/var/log/mongodb-monitoring/*.log {
+    daily
+    missingok
+    rotate 7
+    compress
+    delaycompress
+    notifempty
+    create 0640 {{ owner }} {{ group }}
+    sharedscripts
+    postrotate
+        systemctl reload mongodb-exporter > /dev/null 2>&1 || true
+    endscript
+}

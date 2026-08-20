@@ -1,0 +1,48 @@
+---
+# Parse the MongoDB connection URI into discrete connection facts.
+#
+# pymongo (already installed in the venv) does the parsing, so standard
+# mongodb:// URIs — host lists, replicaSet, authSource, TLS — are handled
+# correctly without fragile regex. The URI is passed via an environment
+# variable (never on the command line) and the task is no_log to keep the
+# embedded credentials out of logs.
+
+- name: Parse the MongoDB connection URI with pymongo
+  ansible.builtin.command:
+    argv:
+      - "{{ mongodb_venv_python }}"
+      - "-c"
+      - |
+        import os, json
+        from pymongo import uri_parser
+        uri = os.environ["MONGODB_URI"]
+        default_port = int(os.environ.get("MONGODB_DEFAULT_PORT", "27017"))
+        parsed = uri_parser.parse_uri(uri, default_port=default_port)
+        opts = {str(k).lower(): v for k, v in dict(parsed.get("options") or {}).items()}
+        nodelist = parsed.get("nodelist") or []
+        out = {
+            "user": parsed.get("username"),
+            "password": parsed.get("password"),
+            "hosts": [h for h, _ in nodelist],
+            "port": nodelist[0][1] if nodelist else None,
+            "authsource": opts.get("authsource") or parsed.get("database") or "admin",
+            "replicaset": opts.get("replicaset"),
+            "tls": bool(opts.get("tls") or opts.get("ssl") or False),
+        }
+        print(json.dumps(out))
+  environment:
+    MONGODB_URI: "{{ mongodb_uri }}"
+    MONGODB_DEFAULT_PORT: "{{ mongodb_port | string }}"
+  register: _mongo_uri_parsed
+  changed_when: false
+  no_log: true
+  tags: ["parse"]
+
+- name: Set MongoDB connection facts
+  ansible.builtin.set_fact:
+    mongo_conn: >-
+      {{ _parsed | combine({'port': _parsed.port | default(mongodb_port, true)}) }}
+  vars:
+    _parsed: "{{ _mongo_uri_parsed.stdout | from_json }}"
+  no_log: true
+  tags: ["parse"]

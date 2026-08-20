@@ -1,0 +1,17 @@
+[primary]
+primary  ansible_host=10.0.1.10  ansible_port=22 ansible_user=ubuntu ansible_ssh_private_key_file=/path/to/key.pem
+
+[secondary]
+#secondary  ansible_host=10.0.1.11  ansible_port=22 ansible_user=ubuntu ansible_ssh_private_key_file=/path/to/key.pem
+
+[percona]
+#percona-secondary  ansible_host=10.0.1.12  ansible_port=22 ansible_user=ubuntu ansible_ssh_private_key_file=/path/to/key.pem
+
+# Dedicated host for PMM Server (Docker). Do NOT co-locate with a MongoDB node:
+# it needs its own resources (2+ CPU, 4+ GB RAM, 100+ GB disk for metrics).
+[pmm_server]
+#pmm_server  ansible_host=10.0.0.100  ansible_port=22 ansible_user=ubuntu ansible_ssh_private_key_file=/path/to/key.pem
+
+[mongodb:children]
+primary
+mongodb

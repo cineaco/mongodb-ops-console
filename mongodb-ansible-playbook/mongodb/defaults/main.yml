@@ -1,0 +1,78 @@
+---
+# defaults file for mongodb
+# These are overridable via inventory/group_vars/mongodb.yml
+
+# MongoDB Version
+mongodb_version: "8.0"
+
+# MongoDB Port
+mongodb_port: 37017
+
+# Replica Set
+replicaset_name: "rs0"
+single_node_replicaset: false
+
+# Replica Set Priorities
+primary_priority: 1
+secondary_priority: 1
+secondary2_priority: 1
+arbiter_priority: 0
+percona_primary_priority: 1
+percona_priority: 1
+
+# Replica Set Votes
+primary_votes: 1
+secondary_votes: 1
+secondary2_votes: 1
+arbiter_votes: 1
+percona_primary_votes: 1
+percona_votes: 1
+
+# Admin Credentials
+create_admin_user: true
+admin_username: admin
+admin_password: "CHANGE_ME"
+
+# Application Database
+application_database_create: false
+application_database: "myapp"
+application_user: "app_user"
+application_password: "CHANGE_ME"
+application_role:
+  - readWrite
+
+# Testing
+wrong_password: "wrong_password"
+
+# Storage
+filesystem: xfs
+mount_path: /datadrive
+external_volume: /dev/nvme1n1
+
+# Oplog
+oplogSizeMB: 10240
+
+# Slack
+slack_enabled: false
+slack_token: ""
+
+# Percona Backup
+backup_enabled: false
+pbm_user_password: "CHANGE_ME"
+percona_backup_s3_bucket: "your-s3-bucket"
+highest_priority: 3
+backup_prefix: pbm
+
+# External EBS Volume
+enable_external_volume: true
+volume_size_gb: 100  # Informational; used in summary report
+
+# Monitoring (Percona mongodb_exporter + Node Exporter)
+enable_monitoring: false
+monitoring_password: "CHANGE_ME"
+
+# Standalone mode (no replica set at all)
+standalone_mode: false
+
+# Slack channel (for bot-token app delivery; leave blank for webhook)
+slack_channel: ""

@@ -1,0 +1,26 @@
+---
+- name: Create replicaset "{{ replicaset_name }}" with arbiter
+  community.mongodb.mongodb_replicaset:
+    login_host: "{{ primary }}"
+    login_port: "{{ mongodb_port }}"
+    replica_set: "{{ replicaset_name }}"
+    members:
+    - host: "{{ arbiter }}:{{ mongodb_port }}"
+      priority: 0
+      votes: "{{ arbiter_votes }}"
+      arbiterOnly: true
+    - host: "{{ primary }}:{{ mongodb_port }}"
+      priority: "{{ primary_priority }}"
+      votes: "{{ primary_votes }}"
+      tags:
+        node: "primary"
+    - host: "{{ secondary }}:{{ mongodb_port }}"
+      priority: "{{ secondary_priority }}"
+      votes: "{{ secondary_votes }}"
+      tags:
+        node: "secondary"
+  # Ensure the task runs on primary, arbiter, and secondary nodes
+  when: inventory_hostname in groups.get('primary', []) or inventory_hostname in groups.get('percona_primary', [])
+  vars:
+    ansible_python_interpreter: /opt/mongodb-venv/bin/python
+  tags: ["replication", "arbiter"]

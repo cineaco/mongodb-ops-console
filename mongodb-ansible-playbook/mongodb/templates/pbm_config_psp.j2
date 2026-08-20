@@ -1,0 +1,11 @@
+storage:
+    type: s3
+    s3:
+        region: ap-south-1
+        bucket: {{ percona_backup_s3_bucket }}
+        prefix: {{ backup_prefix }}
+backup:
+    priority:
+        "{{ percona }}:{{ mongodb_port }}": {{ highest_priority }}
+        "{{ primary }}:{{ mongodb_port }}": 0
+        "{{ secondary }}:{{ mongodb_port }}": 0

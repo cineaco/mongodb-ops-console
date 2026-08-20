@@ -1,0 +1,16 @@
+---
+- name: Install and Configure MongoDB
+  hosts: primary
+  gather_facts: yes
+  become: true
+  roles:
+    - mongodb
+  
+  post_tasks:
+    - name: Final deployment summary
+      debug:
+        msg: |
+          🎉 MongoDB deployment completed successfully!
+          📊 Check the detailed summary above for configuration details.
+          📁 Summary file saved to: /tmp/mongodb_deployment_summary_{{ inventory_hostname }}_{{ ansible_date_time.epoch }}.txt
+      tags: ["summary", "always"]

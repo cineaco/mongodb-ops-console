@@ -1,0 +1,29 @@
+---
+- name: Setup automated MongoDB backups
+  block:
+    - name: Create backup script
+      template:
+        src: mongodb-backup.sh.j2
+        dest: /usr/local/bin/mongodb-backup.sh
+        mode: '0755'
+
+    - name: Setup backup cron job
+      cron:
+        name: "MongoDB daily backup"
+        minute: "0"
+        hour: "2"
+        job: "/usr/local/bin/mongodb-backup.sh"
+        user: "{{ owner }}"
+
+    - name: Configure backup retention policy
+      template:
+        src: backup-cleanup.sh.j2
+        dest: /usr/local/bin/backup-cleanup.sh
+        mode: '0755'
+
+    - name: Setup Point-in-Time Recovery
+      template:
+        src: oplog-backup.sh.j2
+        dest: /usr/local/bin/oplog-backup.sh
+        mode: '0755'
+  when: inventory_hostname in groups['primary']

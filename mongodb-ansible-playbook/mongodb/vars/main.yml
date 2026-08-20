@@ -1,0 +1,62 @@
+---
+###################################################
+##  INTERNAL / DERIVED VARIABLES - DO NOT EDIT   ##
+##  User-configurable vars go in:                ##
+##  inventory/group_vars/mongodb.yml             ##
+###################################################
+
+# KeyFile paths
+mongo_keyfile: /tmp/mongo-keyfile
+mongo_keyfile_dest: /opt/mongodb
+
+# Data directory (derived from mount_path)
+dbDir: "{{ mount_path }}/mongodb/data"
+dbPath: "{{ mount_path }}/mongodb/data/mongo"
+
+# Log directory (derived from mount_path)
+logDir: "{{ mount_path }}/mongodb/logs"
+logpath: "{{ mount_path }}/mongodb/logs/mongod.log"
+
+# PID and keyfile
+pidFilePath: /var/run/mongodb/mongod.pid
+keyFile: /opt/mongodb/mongo-keyfile
+
+# PBM URI (derived from pbm_user_password and mongodb_port)
+MONGODB_URI: PBM_MONGODB_URI=mongodb://pbmuser:{{ pbm_user_password }}@localhost:{{ mongodb_port }}/?authSource=admin
+
+# Dynamic IP discovery from inventory
+primary: "{{ hostvars[groups['primary'][0]]['ansible_default_ipv4']['address'] if groups.get('primary') else '' }}"
+secondary: "{{ hostvars[groups['secondary'][0]]['ansible_default_ipv4']['address'] if groups.get('secondary') else '' }}"
+secondary2: "{{ hostvars[groups['secondary2'][0]]['ansible_default_ipv4']['address'] if groups.get('secondary2') else '' }}"
+arbiter: "{{ hostvars[groups['arbiter'][0]]['ansible_default_ipv4']['address'] if groups.get('arbiter') else '' }}"
+percona_primary: "{{ hostvars[groups['percona_primary'][0]]['ansible_default_ipv4']['address'] if groups.get('percona_primary') else '' }}"
+percona: "{{ hostvars[groups['percona'][0]]['ansible_default_ipv4']['address'] if groups.get('percona') else '' }}"
+percona_secondary: "{{ hostvars[groups['percona_secondary'][0]]['ansible_default_ipv4']['address'] if groups.get('percona_secondary') else '' }}"
+percona_secondary2: "{{ hostvars[groups['percona_secondary2'][0]]['ansible_default_ipv4']['address'] if groups.get('percona_secondary2') else '' }}"
+percona_arbiter: "{{ hostvars[groups['percona_arbiter'][0]]['ansible_default_ipv4']['address'] if groups.get('percona_arbiter') else '' }}"
+
+##################################
+#### INPROGRESS CONFIGURATION ####
+##################################
+
+# Monitoring configuration
+mongodb_exporter_version: "0.39.0"
+monitoring_password: "{{ vault_monitoring_password | default('MonitoringPass123!') }}"
+node_exporter_version: "1.6.1"
+
+# Health check thresholds
+oplog_window_threshold: 24
+disk_usage_threshold: 80
+memory_usage_threshold: 85
+connection_threshold: 800
+
+# Prometheus configuration
+prometheus_scrape_interval: "15s"
+prometheus_retention: "30d"
+
+# Alerting configuration
+alert_on_replica_lag: true
+alert_on_high_connections: true
+alert_on_slow_queries: true
+max_replica_lag_seconds: 10
+slow_query_threshold_ms: 1000

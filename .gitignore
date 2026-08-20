@@ -68,6 +68,13 @@ instance/
 # Scrapy stuff:
 .scrapy
 
+# Ansible & Deployment artifacts
+keys/
+hosts
+*.retry
+vault.yml
+group_vars/vault.yml
+
 # Sphinx documentation
 docs/_build/
 

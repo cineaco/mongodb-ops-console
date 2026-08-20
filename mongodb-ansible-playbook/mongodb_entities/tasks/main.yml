@@ -1,0 +1,48 @@
+---
+# Orchestration for URI-driven MongoDB entity creation.
+#
+# Flow: validate inputs -> parse URI -> typo-guard -> detect primary ->
+#       create roles -> create users -> validate/summarize.
+
+- name: Assert mongodb_uri was provided
+  ansible.builtin.assert:
+    that:
+      - mongodb_uri is defined
+      - mongodb_uri | string | length > 0
+    fail_msg: >-
+      mongodb_uri is required. Pass it at runtime, e.g.
+      -e mongodb_uri='mongodb://user:pass@host:37017/?replicaSet=rs0&authSource=admin'
+  run_once: true
+  tags: ["always"]
+
+- name: Parse the MongoDB connection URI
+  ansible.builtin.import_tasks: parse-uri.yml
+
+- name: Typo-guard referenced databases against mongodb_databases
+  ansible.builtin.assert:
+    that:
+      - >-
+        ((mongodb_users | default([]) | map(attribute='db') | list) +
+         (mongodb_roles | default([]) | map(attribute='db') | list))
+        | unique | difference(mongodb_databases) | length == 0
+    fail_msg: >-
+      One or more users/roles reference a database not listed in mongodb_databases:
+      {{ ((mongodb_users | default([]) | map(attribute='db') | list) +
+          (mongodb_roles | default([]) | map(attribute='db') | list))
+         | unique | difference(mongodb_databases) }}
+    success_msg: "All referenced databases are present in mongodb_databases."
+  when: mongodb_databases | default([]) | length > 0
+  run_once: true
+  tags: ["parse"]
+
+- name: Detect the writable primary
+  ansible.builtin.import_tasks: detect-primary.yml
+
+- name: Create custom roles
+  ansible.builtin.import_tasks: create-roles.yml
+
+- name: Create users
+  ansible.builtin.import_tasks: create-users.yml
+
+- name: Validate and summarize
+  ansible.builtin.import_tasks: validate.yml

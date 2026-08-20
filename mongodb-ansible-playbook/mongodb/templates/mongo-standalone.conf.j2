@@ -1,0 +1,21 @@
+# MongoDB Standalone Configuration (no replication)
+storage:
+  dbPath: {{ dbPath }}
+
+systemLog:
+  destination: file
+  logAppend: true
+  path: {{ logpath }}
+  verbosity: 1
+
+net:
+  port: {{ mongodb_port }}
+  bindIp: 127.0.0.1,{{ vm_ip }}
+  maxIncomingConnections: 1000
+
+processManagement:
+  timeZoneInfo: /usr/share/zoneinfo
+
+operationProfiling:
+  mode: slowOp
+  slowOpThresholdMs: 100

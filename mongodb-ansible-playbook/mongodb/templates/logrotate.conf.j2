@@ -1,0 +1,16 @@
+{{ logpath }} {
+ daily
+ size 1G
+ rotate 20
+ missingok
+ compress
+ delaycompress
+ notifempty
+ create 640 {{ owner }} {{ group }}
+ sharedscripts
+ postrotate
+   if [ -f /var/run/mongodb/mongod.pid ]; then
+     /bin/kill -SIGUSR1 $(pgrep -x mongod) >/dev/null 2>&1
+   fi
+ endscript
+}

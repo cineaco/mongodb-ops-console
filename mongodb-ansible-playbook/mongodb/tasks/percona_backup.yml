@@ -1,0 +1,109 @@
+---
+- name: Setting up Percona Backup
+  block:
+    # Download Percona repository package
+    - name: Download Percona repository package
+      get_url:
+        url: "https://repo.percona.com/apt/percona-release_latest.{{ ansible_lsb.codename }}_all.deb"
+        dest: "/tmp/percona-release_latest.{{ ansible_lsb.codename }}_all.deb"
+
+    # Add Percona repository to the system
+    - name: Update apt cache after adding Percona repo
+      apt:
+        update_cache: yes
+
+    # Install Percona repository package
+    - name: Install Percona repository package
+      apt:
+        deb: "/tmp/percona-release_latest.{{ ansible_lsb.codename }}_all.deb"
+        state: present
+
+    - name: Enable backup repository
+      shell: |
+        percona-release enable pbm release
+
+    - name: Update apt cache after enabling Percona repo
+      apt:
+        update_cache: yes
+      when: ansible_os_family == "Debian"
+
+    - name: Update yum cache after enabling Percona repo
+      yum:
+        update_cache: yes
+      when: ansible_os_family == "RedHat"
+
+    - name: Install Percona Backup for MongoDB
+      apt:
+        name: percona-backup-mongodb
+        state: present
+
+    - name: Create directory for Percona Backup configuration
+      file:
+        path: /etc/percona/backup
+        state: directory
+        owner: root
+        group: root
+        mode: '0755'
+
+    - name: Copy pbm config file to Nodes if Cluster is Primary, Secondary and Secondary
+      template:
+        src: pbm_config_pss.j2 #primary secondary percona-secondary
+        dest: /etc/percona/backup/pbm_config.yaml
+        owner: root
+        group: root
+        mode: 0755
+      when:
+        - "'primary' in groups"
+        - "'secondary' in groups"
+        - "'secondary2' in groups"
+
+    - name: Copy pbm config file to Nodes if Cluster is Primary, Secondary and Percona
+      template:
+        src: pbm_config_psp.j2 #primary secondary & secondary
+        dest: /etc/percona/backup/pbm_config.yaml
+        owner: root
+        group: root
+        mode: 0755
+      when:
+        - "'primary' in groups"
+        - "'secondary' in groups"
+        - "'percona' in groups"
+
+    - name: Copy pbm config file to Nodes if Cluster is Primary, Secondary and Percona
+      template:
+        src: pbm_config.j2 #primary secondary & secondary
+        dest: /etc/percona/backup/pbm_config.yaml
+        owner: root
+        group: root
+        mode: 0755
+      when: inventory_hostname in groups.get('percona', []) or inventory_hostname in groups.get('percona_primary', [])
+
+    - name: Setting up ENV variables for Percona Backup
+      shell: |
+        echo '{{ MONGODB_URI }}' > /etc/default/pbm-agent && echo 'export {{ MONGODB_URI }}' >> /etc/profile
+
+    - name: Start and enable pbm-agent service
+      systemd:
+        name: pbm-agent
+        state: started
+        enabled: yes
+        daemon_reload: yes
+      tags: ["backup"]
+
+    - name: Wait for pbm-agent to be ready
+      pause:
+        seconds: 10
+      tags: ["backup"]
+
+    - name: Check if Percona Backup for MongoDB is running
+      shell: |
+        pbm config --file /etc/percona/backup/pbm_config.yaml
+        pbm status
+        pbm config
+
+  rescue:
+    - name: Backup Setup failed
+      debug:
+        msg: "Backup Config Failed !"
+  when: backup_enabled == true
+  tags: ["backup"]

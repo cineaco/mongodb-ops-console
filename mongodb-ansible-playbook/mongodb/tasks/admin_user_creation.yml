@@ -1,0 +1,55 @@
+---
+# - name: Check if admin user already exists
+#   community.mongodb.mongodb_info:
+#     filter: users
+#   register: existing_users
+#   ignore_errors: true
+#   vars:
+#     ansible_python_interpreter: /opt/mongodb-venv/bin/python
+
+- name: Creating Admin User
+  community.mongodb.mongodb_user:
+    login_host: "{{ ansible_default_ipv4.address }}"
+    login_port: "{{ mongodb_port }}"
+    database: admin
+    name: "{{ admin_username }}"
+    password: "{{ admin_password }}"
+    roles:
+      - root
+    state: present
+  register: admin_user_creation
+  when: 
+    - inventory_hostname in groups.get('primary', []) or inventory_hostname in groups.get('percona_primary', [])
+    #- existing_users is not defined or existing_users.users is not defined or 'admin' not in (existing_users.users | map(attribute='user') | list)
+  tags: ["users", "admin-user", "security", "setup", "all"]
+  vars:
+    ansible_python_interpreter: /opt/mongodb-venv/bin/python
+
+- name: Check if admin user creation failed
+  fail:
+    msg: "Failed to create admin user. Error: {{ admin_user_creation.msg | default('Unknown error') }}"
+  when: 
+    - inventory_hostname in groups.get('primary', []) or inventory_hostname in groups.get('percona_primary', [])
+    - admin_user_creation is defined
+    - admin_user_creation is failed
+  tags: ["users", "admin-user", "security", "setup", "all"]
+
+- name: Verify admin user creation
+  community.mongodb.mongodb_info:
+    filter: users
+    login_user: "{{ admin_username }}"
+    login_password: "{{ admin_password }}"
+    login_database: admin
+    login_port: "{{ mongodb_port }}"
+  register: user_verification
+  failed_when: user_verification is failed
+  when: inventory_hostname in groups.get('primary', []) or inventory_hostname in groups.get('percona_primary', [])
+  vars:
+    ansible_python_interpreter: /opt/mongodb-venv/bin/python
+  tags: ["users", "admin-user", "security", "setup", "all"]
+
+- name: Display created users
+  debug:
+    msg: "Admin user successfully created and verified"
+  when: inventory_hostname in groups.get('primary', []) or inventory_hostname in groups.get('percona_primary', [])
+  tags: ["users", "admin-user", "security", "setup", "all"]

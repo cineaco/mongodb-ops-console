@@ -1,0 +1,42 @@
+# MongoDB Configuration with Authorization Enabled
+# where and how to store data.
+storage:
+  dbPath: {{ dbPath }}
+#  wiredTiger:
+#    engineConfig:
+#      cacheSizeGB: 1  # Adjust based on available RAM
+
+# where to write logging data.
+systemLog:
+  destination: file
+  logAppend: true
+  path: {{ logpath }}
+  logRotate: reopen
+  verbosity: 1
+
+# network interfaces
+net:
+  port: {{ mongodb_port }}
+  bindIp: 127.0.0.1,{{ vm_ip }}
+  maxIncomingConnections: 1000
+
+# how the process runs
+processManagement:
+  timeZoneInfo: /usr/share/zoneinfo
+  #pidFilePath: {{ pidFilePath }}
+
+# security configuration
+security:
+  authorization: enabled
+  keyFile: {{ keyFile }}
+  javascriptEnabled: false  # Disable server-side JavaScript for security
+
+# operation profiling for performance monitoring
+operationProfiling:
+  mode: slowOp
+  slowOpThresholdMs: 100
+
+# replica set configuration
+replication:
+  replSetName: {{ replicaset_name }}
+  oplogSizeMB: {{ oplogSizeMB }}  # Adjust based on requirements

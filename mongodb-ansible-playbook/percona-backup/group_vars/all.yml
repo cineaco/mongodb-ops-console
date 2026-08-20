@@ -1,0 +1,39 @@
+---
+# ── Percona Backup for MongoDB (PBM) settings ──────────────────────────────
+# Override secrets with ansible-vault:
+#   ansible-vault create group_vars/vault.yml
+#   ansible-playbook -i inventory.production pbm-setup.yml --ask-vault-pass
+
+# MongoDB admin credentials (used once, to create the pbm user on the primary)
+mongodb_admin_user: "db_admin"
+mongodb_admin_password: "your_secure_admin_password_here"
+
+# Dedicated PBM user (created by this playbook)
+pbm_user: "pbmuser"
+pbm_password: "pbmuser"
+
+# MongoDB connection
+mongodb_port: 37017
+mongo_shell: "mongosh"          # use "mongo" on older deployments
+
+# PBM connection URI written to /etc/default/pbm-agent on every node.
+# Password is percent-encoded automatically (required for chars like # @ :)
+pbm_mongodb_uri: "mongodb://{{ pbm_user }}:{{ pbm_password | urlencode }}@localhost:{{ mongodb_port }}/?authSource=admin"
+
+# ── Backup storage ──────────────────────────────────────────────────────────
+# "s3" or "filesystem"
+pbm_storage_type: "s3"
+
+# S3 / S3-compatible (MinIO etc.) — PBM needs a DEDICATED bucket
+pbm_s3_region: "ap-south-1"
+pbm_s3_bucket: "my-pbm-backup-bucket"
+pbm_s3_prefix: "pbm/"
+pbm_s3_endpoint_url: ""          # set for MinIO/S3-compatible, empty for AWS
+pbm_s3_access_key: ""
+pbm_s3_secret_key: ""
+
+# Filesystem storage (must be shared/NFS-mounted on ALL nodes at same path)
+pbm_fs_path: "/data/local_backups"
+
+# Where the rendered pbm config lives on the node that applies it
+pbm_config_path: "/etc/pbm/pbm_config.yaml"

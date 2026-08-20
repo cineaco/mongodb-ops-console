@@ -1,0 +1,27 @@
+---
+# Create users on the primary. `update_password: on_create` keeps re-runs clean
+# (the password is only set when the user is first created, so existing users do
+# not report a spurious change every run). no_log protects the passwords.
+
+- name: Create MongoDB users on the primary
+  community.mongodb.mongodb_user:
+    login_host: "127.0.0.1"
+    login_port: "{{ mongo_conn.port }}"
+    login_user: "{{ mongo_conn.user | default(omit, true) }}"
+    login_password: "{{ mongo_conn.password | default(omit, true) }}"
+    login_database: "{{ mongo_conn.authsource | default('admin') }}"
+    ssl: "{{ mongo_conn.tls | default(false) }}"
+    database: "{{ item.db }}"
+    name: "{{ item.name }}"
+    password: "{{ item.password }}"
+    roles: "{{ item.roles }}"
+    update_password: on_create
+    state: present
+  loop: "{{ mongodb_users | default([]) }}"
+  loop_control:
+    label: "{{ item.db }}.{{ item.name }}"
+  when: is_primary | bool
+  vars:
+    ansible_python_interpreter: "{{ mongodb_venv_python }}"
+  no_log: true
+  tags: ["users"]

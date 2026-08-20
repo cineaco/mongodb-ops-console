@@ -1,0 +1,73 @@
+---
+  - name: MongoDB DR Setup
+    hosts: all
+    gather_facts: true
+    become: true
+    vars_prompt:
+      - name: Backup_Time_For_Restore
+        prompt: "Enter the backup time for restore (e.g., '2023-01-01T00:00:00Z')"
+        private: false
+
+    vars:
+      mongodb_uri: "mongodb://pbmuser:pbmuser@localhost:37017/?authSource=admin"
+    tasks:
+      - name: Ensure MongoDB is installed
+        apt:
+          name: percona-server-mongodb-server
+          state: present
+
+      - name: Start MongoDB service
+        service:
+          name: mongod
+          state: started
+          enabled: yes
+
+      - name: Ensure pbm-agent is installed
+        apt:
+          name: percona-backup-mongodb
+          state: present
+
+      - name: Start pbm-agent service
+        service:
+          name: pbm-agent
+          state: started
+          enabled: yes
+        
+      - name: Check PBM status
+        shell: pbm status --mongodb-uri {{ mongodb_uri }}
+        register: pbm_status
+        changed_when: false
+        # environment:
+        #   PBM_MONGODB_URI: "{{ mongodb_uri }}"
+
+      - name: Check PBM config
+        shell: pbm config --mongodb-uri {{ mongodb_uri }} --out json
+        register: pbm_config
+        changed_when: false
+
+      - debug:
+          msg: "PBM Status: {{ pbm_status.stdout }}"
+
+      - debug:
+          msg: "PBM Config: {{ pbm_config.stdout }}"
+
+      - name: Force resync pbm config
+        shell: pbm config --mongodb-uri {{ mongodb_uri }} --force-resync
+        register: resync_result
+
+      - debug:
+          msg: "PBM Configuration: {{ pbm_config.stdout_lines }}"
+        register: resync_result
+        
+      - name: Check PBM status
+        shell: pbm status --mongodb-uri {{ mongodb_uri }}
+        register: pbm_status
+
+      - shell: sleep 10
+
+      - name: restore
+        shell: pbm restore "{{ Backup_Time_For_Restore }}" --mongodb-uri {{ mongodb_uri }} --out json
+        register: restore_result
+
+      - debug:
+          msg: "PBM Restore Result: {{ restore_result.stdout }}"

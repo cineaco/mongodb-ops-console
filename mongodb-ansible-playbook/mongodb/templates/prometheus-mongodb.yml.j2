@@ -1,0 +1,27 @@
+global:
+  scrape_interval: {{ prometheus_scrape_interval }}
+  evaluation_interval: 15s
+
+rule_files:
+  - "mongodb_rules.yml"
+
+scrape_configs:
+  - job_name: 'mongodb'
+    static_configs:
+      - targets:
+{% for host in groups['mongodb'] %}
+        - '{{ hostvars[host]['ansible_default_ipv4']['address'] }}:9216'
+{% endfor %}
+
+  - job_name: 'node'
+    static_configs:
+      - targets:
+{% for host in groups['mongodb'] %}
+        - '{{ hostvars[host]['ansible_default_ipv4']['address'] }}:9100'
+{% endfor %}
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets:
+          - 'localhost:9093'

@@ -1,0 +1,210 @@
+---
+# Percona Monitoring and Management (PMM 3) — MongoDB monitoring setup
+#
+#   ansible-playbook -i inventory.production pmm-setup.yml --ask-vault-pass
+#
+# Flow: [optional] PMM Server (Docker) → pmm-client install + register
+#       → pmm monitoring user on primary → add mongodb service
+# QAN profiler play is last and gated behind pmm_enable_profiler=true
+# because it restarts mongod (rolling, one node at a time).
+
+# ── Play 1 (optional): PMM Server via Docker ────────────────────────────────
+# Runs only if a host is defined in the [pmm_server] inventory group.
+- name: Deploy PMM Server
+  hosts: pmm_server
+  become: yes
+  tasks:
+    - name: Verify Docker is installed
+      ansible.builtin.command: docker --version
+      changed_when: false
+
+    - name: Check if pmm-data volume exists
+      ansible.builtin.command: docker volume inspect pmm-data
+      register: pmm_volume_check
+      failed_when: false
+      changed_when: false
+
+    - name: Create pmm-data volume
+      ansible.builtin.command: docker volume create pmm-data
+      when: pmm_volume_check.rc != 0
+
+    - name: Check if pmm-server container exists
+      ansible.builtin.command: docker inspect --format '{{ "{{" }}.State.Status{{ "}}" }}' pmm-server
+      register: pmm_container
+      failed_when: false
+      changed_when: false
+
+    - name: Run PMM Server container
+      ansible.builtin.command: >
+        docker run --detach --restart always
+        --publish {{ pmm_server_port }}:8443
+        --env PMM_DATA_RETENTION={{ pmm_data_retention }}
+        --volume pmm-data:/srv
+        --name pmm-server
+        {{ pmm_server_docker_image }}
+      when: pmm_container.rc != 0
+
+    - name: Start pmm-server container if stopped
+      ansible.builtin.command: docker start pmm-server
+      when:
+        - pmm_container.rc == 0
+        - "'running' not in pmm_container.stdout"
+
+# ── Play 2: Install and register pmm-client on all MongoDB nodes ────────────
+- name: Install and register PMM Client
+  hosts: mongodb
+  become: yes
+  tasks:
+    - name: Download Percona release package
+      ansible.builtin.get_url:
+        url: https://repo.percona.com/apt/percona-release_latest.generic_all.deb
+        dest: /tmp/percona-release_latest.generic_all.deb
+        mode: "0644"
+
+    - name: Install Percona release package
+      ansible.builtin.apt:
+        deb: /tmp/percona-release_latest.generic_all.deb
+        state: present
+
+    - name: Enable PMM 3 client repository
+      ansible.builtin.command: percona-release enable pmm3-client
+      args:
+        creates: /etc/apt/sources.list.d/percona-pmm3-client-release.list
+
+    - name: Install pmm-client
+      ansible.builtin.apt:
+        name: pmm-client
+        state: present
+        update_cache: yes
+
+    - name: Check if pmm-agent is already registered
+      ansible.builtin.command: pmm-admin status
+      register: pmm_status_check
+      failed_when: false
+      changed_when: false
+
+    - name: Register pmm-client with PMM Server
+      ansible.builtin.command: >
+        pmm-admin config --force --server-insecure-tls
+        --server-url=https://{{ pmm_admin_user }}:{{ pmm_admin_password | urlencode }}@{{ pmm_server_host }}:{{ pmm_server_port }}
+        {{ ansible_host }} generic {{ inventory_hostname }}
+      when: pmm_status_check.rc != 0 or (pmm_force_register | bool)
+      no_log: true
+
+# ── Play 3: Create pmm monitoring role + user on the replica set primary ────
+- name: Create PMM monitoring user on the primary
+  hosts: primary
+  become: yes
+  vars:
+    mongo_auth: >-
+      --port {{ mongodb_port }}
+      -u {{ mongodb_admin_user }} -p '{{ mongodb_admin_password }}'
+      --authenticationDatabase admin --quiet
+  tasks:
+    - name: Check if pmmMonitor role exists
+      ansible.builtin.shell: >
+        {{ mongo_shell }} {{ mongo_auth }} --eval
+        'JSON.stringify(db.getSiblingDB("admin").getRole("pmmMonitor"))'
+      register: pmm_role_check
+      changed_when: false
+      no_log: true
+
+    - name: Create pmmMonitor role
+      ansible.builtin.shell: |
+        {{ mongo_shell }} {{ mongo_auth }} --eval '
+          db.getSiblingDB("admin").createRole({
+            "role": "pmmMonitor",
+            "privileges": [
+              { "resource": { "db": "", "collection": "" },
+                "actions": [ "dbHash", "find", "listIndexes", "listCollections", "collStats", "dbStats", "indexStats" ] },
+              { "resource": { "db": "", "collection": "system.version" },
+                "actions": [ "find" ] },
+              { "resource": { "db": "", "collection": "system.profile" },
+                "actions": [ "dbStats", "collStats", "indexStats" ] }
+            ],
+            "roles": []
+          })'
+      when: pmm_role_check.stdout | trim == 'null'
+      no_log: true
+
+    - name: Check if pmm user exists
+      ansible.builtin.shell: >
+        {{ mongo_shell }} {{ mongo_auth }} --eval
+        'JSON.stringify(db.getSiblingDB("admin").getUser("{{ pmm_mongodb_user }}"))'
+      register: pmm_user_check
+      changed_when: false
+      no_log: true
+
+    - name: Create pmm user
+      ansible.builtin.shell: |
+        {{ mongo_shell }} {{ mongo_auth }} --eval '
+          db.getSiblingDB("admin").createUser({
+            "user": "{{ pmm_mongodb_user }}",
+            "pwd": "{{ pmm_mongodb_password }}",
+            "roles": [
+              { "db": "admin", "role": "pmmMonitor" },
+              { "db": "local", "role": "read" },
+              { "db": "admin", "role": "clusterMonitor" }{% if mongodb_version_8_plus | bool %},
+              { "db": "admin", "role": "directShardOperations" }{% endif %}
+            ]
+          })'
+      when: pmm_user_check.stdout | trim == 'null'
+      no_log: true
+
+# ── Play 4: Register MongoDB service with PMM on every node ─────────────────
+- name: Add MongoDB service to PMM
+  hosts: mongodb
+  become: yes
+  tasks:
+    - name: Check if MongoDB service is already added
+      ansible.builtin.command: pmm-admin list
+      register: pmm_service_check
+      changed_when: false
+
+    - name: Add MongoDB service
+      ansible.builtin.command: >
+        pmm-admin add mongodb
+        --username={{ pmm_mongodb_user }}
+        --password={{ pmm_mongodb_password }}
+        --cluster={{ pmm_cluster_name }}
+        --enable-all-collectors
+        {{ pmm_service_name }} 127.0.0.1:{{ mongodb_port }}
+      when: pmm_service_name not in pmm_service_check.stdout
+      no_log: true
+
+  post_tasks:
+    - name: Verify PMM agent status
+      ansible.builtin.command: pmm-admin status
+      register: pmm_status
+      changed_when: false
+      failed_when: false
+
+    - name: Show PMM status
+      ansible.builtin.debug:
+        msg: "{{ pmm_status.stdout_lines | default(pmm_status.stderr_lines) }}"
+
+# ── Play 5 (optional, gated): Enable profiler for Query Analytics ───────────
+# Requires a ROLLING mongod restart (serial: 1). Run only in a change window:
+#   ansible-playbook -i inventory.production pmm-setup.yml -e pmm_enable_profiler=true
+- name: Enable MongoDB profiler for QAN
+  hosts: mongodb
+  become: yes
+  serial: 1
+  tasks:
+    - name: Configure operationProfiling in mongod.conf
+      ansible.builtin.blockinfile:
+        path: "{{ mongod_config_path }}"
+        marker: "# {mark} ANSIBLE MANAGED — PMM QAN profiler"
+        block: |
+          operationProfiling:
+            mode: all
+            slowOpThresholdMs: {{ profiler_slowms }}
+        state: present
+      when: pmm_enable_profiler | bool
+      notify: Restart mongod
+
+  handlers:
+    - name: Restart mongod
+      ansible.builtin.systemd:
+        name: mongod
+        state: restarted

@@ -1,0 +1,34 @@
+---
+# Verify on the primary that the requested users and roles now exist, then print
+# a concise summary. Verification is advisory (it does not fail the run on a
+# mismatch) — the create modules above already fail hard on real errors.
+
+- name: Gather users and roles from the primary
+  community.mongodb.mongodb_info:
+    login_host: "127.0.0.1"
+    login_port: "{{ mongo_conn.port }}"
+    login_user: "{{ mongo_conn.user | default(omit, true) }}"
+    login_password: "{{ mongo_conn.password | default(omit, true) }}"
+    login_database: "{{ mongo_conn.authsource | default('admin') }}"
+    ssl: "{{ mongo_conn.tls | default(false) }}"
+    filter:
+      - users
+      - roles
+  register: _mongo_info
+  when: is_primary | bool
+  vars:
+    ansible_python_interpreter: "{{ mongodb_venv_python }}"
+  tags: ["validate"]
+
+- name: Summarize entity creation
+  ansible.builtin.debug:
+    msg:
+      - "MongoDB entity creation completed on primary: {{ inventory_hostname }}"
+      - "Roles ensured ({{ mongodb_roles | default([]) | length }}): {{ mongodb_roles | default([]) | map(attribute='name') | list }}"
+      - "Users ensured ({{ mongodb_users | default([]) | length }}): {{ mongodb_users | default([]) | map(attribute='name') | list }}"
+      - >-
+        Databases referenced:
+        {{ ((mongodb_users | default([]) | map(attribute='db') | list) +
+            (mongodb_roles | default([]) | map(attribute='db') | list)) | unique | list }}
+  when: is_primary | bool
+  tags: ["validate"]

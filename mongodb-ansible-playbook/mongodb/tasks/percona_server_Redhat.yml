@@ -1,0 +1,49 @@
+---
+- name: Install curl
+  yum:
+    name: curl
+    state: present
+  
+- name: Download Percona repository package
+  yum:
+    name: https://repo.percona.com/yum/percona-release-latest.noarch.rpm
+    state: present
+
+- name: Install Percona repository package
+  yum:
+    name: percona-release-latest.noarch.rpm
+    state: present
+
+- name: Enable Percona repository
+  shell: |
+    percona-release enable psmdb-80 release
+  when: mongodb_version == '8.0'
+
+- name: Enable Percona repository for 7.0
+  shell: |
+    percona-release enable psmdb-70 release
+  when: mongodb_version == '7.0'
+
+- name: Enable Percona repository for 6.0
+  shell: |
+    percona-release enable psmdb-60 release
+  when: mongodb_version == '6.0'
+
+- name: Enable Percona repository for 5.0
+  shell: |
+    percona-release enable psmdb-50 release
+  when: mongodb_version == '5.0'
+
+- name: Update yum cache after enabling Percona repo
+  yum:
+    update_cache: yes
+
+- name: Install Percona Server for MongoDB
+  yum:
+    name: percona-server-mongodb
+    state: present
+
+- name: Install Percona Server for MongoDB tools
+  yum:
+    name: percona-server-mongodb-tools
+    state: present

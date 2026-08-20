@@ -1,0 +1,76 @@
+---
+- name: Install curl
+  apt:
+    name: curl
+    state: present
+  tags: ["percona-setup", "install", "dependencies"]
+
+# Download Percona repository package
+- name: Download Percona repository package
+  shell: |
+    wget https://repo.percona.com/apt/percona-release_latest.$(lsb_release -sc)_all.deb
+  tags: ["percona-setup", "install", "repository"]
+
+# Add Percona repository to the system
+- name: Update apt cache after adding Percona repo
+  apt:
+    update_cache: yes
+  tags: ["percona-setup", "install", "repository"]
+
+# Install Percona repository package
+- name: Install Percona repository package
+  shell: |
+    dpkg -i percona-release_latest.$(lsb_release -sc)_all.deb
+  tags: ["percona-setup", "install", "repository"]
+
+# Enable Percona repository based on MongoDB version
+- name: Enable Percona repository
+  shell: |
+    percona-release enable psmdb-80 release
+  when: mongodb_version == '8.0'
+  tags: ["percona-setup", "install", "repository"]
+
+# Enable Percona repository for different MongoDB versions
+- name: Enable Percona repository for 7.0
+  shell: |
+    percona-release enable psmdb-70 release
+  when: mongodb_version == '7.0'
+  tags: ["percona-setup", "install", "repository"]
+
+- name: Enable Percona repository for 6.0
+  shell: |
+    percona-release enable psmdb-60 release
+  when: mongodb_version == '6.0'
+  tags: ["percona-setup", "install", "repository"]
+
+- name: Enable Percona repository for 5.0
+  shell: |
+    percona-release enable psmdb-50 release
+  when: mongodb_version == '5.0'
+  tags: ["percona-setup", "install", "repository"]
+
+# Update apt cache after enabling Percona repo
+- name: Update apt cache after enabling Percona repo
+  apt:
+    update_cache: yes
+  tags: ["percona-setup", "install", "repository"]
+
+# Remove broken shim-signed before install — EC2 instances don't use UEFI secure boot
+- name: Remove broken shim-signed package if present (EC2 — no UEFI secure boot needed)
+  shell: dpkg --remove --force-remove-reinstreq shim-signed 2>/dev/null || true
+  changed_when: false
+  tags: ["percona-setup", "install", "mongodb"]
+
+# Install Percona Server for MongoDB
+- name: Install Percona Server for MongoDB
+  apt:
+    name: "percona-server-mongodb={{ mongodb_version }}.*"
+    state: present
+  tags: ["percona-setup", "install", "mongodb"]
+
+# Install Percona Server for MongoDB tools
+- name: Install Percona Server for MongoDB tools
+  apt:
+    name: percona-server-mongodb-tools
+    state: present
+  tags: ["percona-setup", "install", "mongodb"]

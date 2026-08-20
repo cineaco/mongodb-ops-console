@@ -1,0 +1,52 @@
+---
+- name: Create Percona user role
+  block:
+    - name: Create directory for Percona Backup configuration
+      file:
+        path: /etc/percona/backup
+        state: directory
+        owner: root
+        group: root
+        mode: '0755'
+
+    - name: Create role from template
+      template:
+        src: percona_user_role.j2
+        dest: /etc/percona/backup/mongodb_role.json
+      
+    - name: Create Percona user role
+      command: mongosh --port "{{ mongodb_port }}" -u "{{ admin_username }}" -p "{{ admin_password }}" --authenticationDatabase admin --quiet --file /etc/percona/backup/mongodb_role.json
+      register: percona_role_creation
+      ignore_errors: true
+
+    - assert:
+        that:
+          - percona_role_creation.rc == 0 or "already exists" in percona_role_creation.stderr
+        fail_msg: "Failed to create Percona user role: {{ percona_role_creation.stderr }}"
+        success_msg: "Percona user role is ready (created or already existed)"
+
+    - name: Create user and assigning role
+      template:
+        src: percona_user.j2
+        dest: /etc/percona/backup/mongodb_user.json
+
+    - name: Create Percona user
+      command: mongosh --port "{{ mongodb_port }}" -u "{{ admin_username }}" -p "{{ admin_password }}" --authenticationDatabase admin --quiet --file /etc/percona/backup/mongodb_user.json
+      register: percona_user_creation
+      ignore_errors: true
+
+    - assert:
+        that:
+          - percona_user_creation.rc == 0 or "already exists" in percona_user_creation.stderr
+        fail_msg: "Failed to create Percona user: {{ percona_user_creation.stderr }}"
+        success_msg: "Successfully created Percona user"
+
+  rescue:
+    - name: Handle Percona user creation failure
+      debug:
+        msg: "Failed to create Percona user"
+  always: []
+  when:
+    - inventory_hostname in groups.get('percona_primary', []) or inventory_hostname in groups.get('primary', [])
+    - backup_enabled == true
+  tags: ["backup"]

@@ -1,0 +1,34 @@
+---
+- name: MongoDB security hardening
+  block:
+    - name: Configure SSL/TLS encryption
+      template:
+        src: mongo-ssl.conf.j2
+        dest: /etc/mongod-ssl.conf
+
+    - name: Setup certificate rotation
+      template:
+        src: cert-rotation.sh.j2
+        dest: /usr/local/bin/cert-rotation.sh
+        mode: '0755'
+
+    - name: Configure firewall rules
+      ufw:
+        rule: allow
+        port: "{{ mongodb_port }}"
+        src: "{{ item }}"
+      loop:
+        - "{{ primary }}"
+        - "{{ secondary }}"
+        - "{{ hidden }}"
+
+    - name: Setup audit logging
+      template:
+        src: audit.conf.j2
+        dest: /etc/mongod-audit.conf
+
+    - name: Configure LDAP authentication
+      template:
+        src: ldap-auth.conf.j2
+        dest: /etc/mongod-ldap.conf
+      when: enable_ldap_auth | default(false)

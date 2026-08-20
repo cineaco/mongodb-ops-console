@@ -1,0 +1,45 @@
+---
+# ── Percona Monitoring and Management (PMM 3) settings ──────────────────────
+# Override secrets with ansible-vault:
+#   ansible-vault create group_vars/vault.yml
+#   ansible-playbook -i inventory.production pmm-setup.yml --ask-vault-pass
+
+# PMM Server (where dashboards live). Clients push metrics here over HTTPS.
+pmm_server_host: "10.0.0.100"        # IP/FQDN reachable from all MongoDB nodes
+pmm_server_port: 443
+pmm_admin_user: "admin"
+pmm_admin_password: "admin"   # default is admin — change on first login
+pmm_server_docker_image: "percona/pmm-server:3"
+
+# Metrics/QAN retention. Default is 30d (720h); keep this LOW on small disks —
+# the previous PMM instance on this host filled 20 GB of ClickHouse QAN data.
+pmm_data_retention: "168h"   # 7 days
+
+# Force re-registration of pmm-client even if already configured
+pmm_force_register: false
+
+# MongoDB admin credentials (used once, to create the pmm user on the primary)
+mongodb_admin_user: "db_admin"
+mongodb_admin_password: "your_secure_admin_password_here"
+
+# Dedicated PMM monitoring user (created by this playbook)
+pmm_mongodb_user: "pmm"
+pmm_mongodb_password: "pmm"
+
+# MongoDB connection
+mongodb_port: 37017
+mongo_shell: "mongosh"              # use "mongo" on older deployments
+mongodb_version_8_plus: true       # true adds directShardOperations role (MongoDB >= 8.0)
+
+# Service registration
+pmm_cluster_name: "rs"         # replica set / cluster label shown in dashboards
+pmm_service_name: "{{ inventory_hostname }}-mongodb"
+
+# ── Query Analytics profiler (OPTIONAL — requires rolling mongod restart!) ──
+# mode:all profiling adds write overhead; leave disabled unless QAN is needed
+# and you are inside a change window. rateLimit works only on Percona Server
+# for MongoDB (not community MongoDB).
+pmm_enable_profiler: false
+mongod_config_path: "/etc/mongod.conf"
+profiler_slowms: 200
+profiler_rate_limit: 100

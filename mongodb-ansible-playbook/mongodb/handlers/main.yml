@@ -1,0 +1,31 @@
+---
+# handlers file for mongodb
+- name: restart mongod
+  systemd:
+    name: mongod.service
+    state: restarted
+  listen: "restart mongod"
+
+- name: reload mongod
+  systemd:
+    name: mongod.service
+    state: reloaded
+  listen: "reload mongod"
+
+- name: start mongod
+  systemd:
+    name: mongod.service
+    state: started
+    enabled: yes
+  listen: "start mongod"
+
+- name: stop mongod
+  systemd:
+    name: mongod.service
+    state: stopped
+  listen: "stop mongod"
+
+- name: restart mongodb-exporter
+  systemd:
+    name: mongodb-exporter
+    state: restarted

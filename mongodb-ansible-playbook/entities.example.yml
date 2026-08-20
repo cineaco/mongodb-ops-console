@@ -1,0 +1,78 @@
+---
+# Example entity definitions for mongodb-create-entities.yml.
+#
+# Copy this file to entities.yml (or keep your own, vault-encrypted), edit, then run:
+#
+#   ansible-playbook -i inventory/ mongodb-create-entities.yml \
+#     -e @entities.yml \
+#     -e mongodb_uri='mongodb://admin:pw@h1:37017,h2:37017,h3:37017/?replicaSet=rs0&authSource=admin'
+#
+# `mongodb_uri` carries the privileged (admin) credentials and is NOT committed —
+# pass it via --extra-vars or an Ansible Vault file. All three lists below are
+# optional; provide only what you need.
+
+# ---------------------------------------------------------------------------
+# Databases (ADVISORY ONLY)
+# MongoDB does not persist empty databases, so nothing is materialized here.
+# When this list is non-empty it acts as a typo-guard: every `db` referenced by
+# a user or role below must appear in this list, otherwise the run fails early.
+# Leave empty ([]) to skip the check.
+# ---------------------------------------------------------------------------
+mongodb_databases:
+  - appdb
+  - reportsdb
+
+# ---------------------------------------------------------------------------
+# Custom roles (created before users so users can reference them)
+#   name        (required) role name
+#   db          (required) database the role is defined in
+#   privileges  (optional) list of { resource, actions }
+#   roles       (optional) inherited roles ({ db, role } or built-in role name)
+# ---------------------------------------------------------------------------
+mongodb_roles:
+  - name: appReadWrite
+    db: appdb
+    privileges:
+      - resource:
+          db: appdb
+          collection: ""        # "" = all collections in the db
+        actions:
+          - find
+          - insert
+          - update
+          - remove
+    roles: []
+
+  - name: reportsReadOnly
+    db: reportsdb
+    privileges:
+      - resource:
+          db: reportsdb
+          collection: ""
+        actions:
+          - find
+    roles: []
+
+# ---------------------------------------------------------------------------
+# Users
+#   name      (required) username
+#   db        (required) database the user is defined in (its auth database)
+#   password  (required) prefer a vaulted variable, e.g. "{{ vault_appuser_password }}"
+#   roles     (required) list of { db, role } dicts and/or role-name strings.
+#             A bare string is interpreted as a role in the user's own db.
+# ---------------------------------------------------------------------------
+mongodb_users:
+  - name: appuser
+    db: appdb
+    password: "ChangeMe_App_123"        # replace with a vaulted value in real use
+    roles:
+      - db: appdb
+        role: readWrite
+      - appReadWrite                     # custom role created above (same db)
+
+  - name: reportsuser
+    db: reportsdb
+    password: "ChangeMe_Reports_123"     # replace with a vaulted value in real use
+    roles:
+      - db: reportsdb
+        role: read

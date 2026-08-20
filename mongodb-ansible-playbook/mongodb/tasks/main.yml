@@ -1,0 +1,332 @@
+# Setup/install tasks.
+---
+    - name: This is the Pre-Requisite message for MongoDB setup
+      ansible.builtin.debug:
+        msg: 
+        - "Python3"
+        - "Connectivity Between Nodes on Port {{ mongodb_port }} is Required"
+        - "We will install MongoDB version : {{ mongodb_version }}"
+        - "Ensure that the Ansible user has sudo privileges on all nodes"
+      tags: ["info"]
+
+    # Include OS-specific variables.
+    - name: Include OS-specific variables.
+      include_vars: "{{ ansible_os_family }}.yml"
+      when: inventory_hostname not in groups.get('percona', []) or inventory_hostname in groups.get('percona_primary', [])
+      tags: ["install", "community"]
+
+    # Include Percona Debian variables percona
+    - name: Include Percona Debian variables.
+      include_vars: Percona_Debian.yml
+      when: (inventory_hostname in groups.get('percona', []) or inventory_hostname in groups.get('percona_primary', [])) and ansible_os_family == 'Debian'
+      tags: ["install", "percona"]
+
+    # Include main variables.
+    - name: Include main variables.
+      include_vars: main.yml
+      tags: ["config"]
+
+    #Install Community MongoDB
+    - name: Install Community MongoDB version "{{ mongodb_version }}"
+      include_tasks: "{{ ansible_os_family }}.yml"
+      when: inventory_hostname not in groups.get('percona_primary', []) and inventory_hostname not in groups.get('percona', [])
+      tags: ["install", "community"]
+
+    #Install Percona Server for MongoDB
+    - name: Install Percona MongoDB Server version"{{ mongodb_version }}"
+      include_tasks: "percona_server.yml"
+      when: 
+        - inventory_hostname in groups.get('percona_primary', []) or inventory_hostname in groups.get('percona', [])
+        - ansible_os_family == 'Debian'
+      tags: ["install", "percona"]
+
+    #Get the private IP address
+    - name: Set private IP from Ansible facts
+      set_fact:
+        vm_ip: "{{ ansible_default_ipv4.address }}"
+      tags: ["config"]
+
+    #Configuration without authorization
+    - name: Add mongod-nonautorization conf file.
+      template:
+        src: mongo-nonauthorization.conf.j2
+        dest: /etc/mongod.conf
+        owner: "{{ owner }}"
+        group: "{{ group }}"
+        mode: 0644
+      tags: ["config"]
+
+    #Configure MongoDB
+    - name: Configure Mongodb.
+      include_tasks: "configure-mongodb.yml"
+      tags: ["config"]
+    
+    #Create admin user
+    - name: Setting up admin user password
+      include_tasks: "admin_user_creation.yml"
+      when:
+        - create_admin_user | bool
+        - inventory_hostname in groups.get('primary', []) or inventory_hostname in groups.get('percona_primary', [])
+      register: admin_user_result
+      tags: ["security"]
+
+    #Verify admin user creation
+    - name: Verify admin user creation succeeded
+      fail:
+        msg: "Admin user creation failed. Cannot proceed with replication setup."
+      when:
+        - admin_user_result is defined
+        - admin_user_result is failed
+      ignore_errors: true
+      tags: ["security"]
+
+    #Wait for admin user
+    - name: Wait for admin user to be available across cluster
+      pause:
+        seconds: 5
+      when: inventory_hostname in groups.get('primary', []) or inventory_hostname in groups.get('percona_primary', [])
+      tags: ["security"]
+
+    #Enable replication config
+    - name: Add mongod-replication conf file without authorization
+      template:
+        src: mongo-replication-no-auth.conf.j2
+        dest: /etc/mongod.conf
+        owner: "{{ owner }}"
+        group: "{{ group }}"
+        mode: 0644
+      when: not (standalone_mode | bool)
+      tags: ["replication"]
+
+    #Restart for replication
+    - name: Restart mongod service with replication (no auth)
+      systemd:
+         name: mongod.service
+         state: restarted
+      when: not (standalone_mode | bool)
+      tags: ["replication"]
+
+    - name: Wait for MongoDB to be ready with replication
+      wait_for:
+        port: "{{ mongodb_port }}"
+        host: "{{ ansible_default_ipv4.address }}"
+        delay: 5
+        timeout: 60
+      when: not (standalone_mode | bool)
+      tags: ["replication"]
+
+    #Setup replication variants
+    - name: Setting up Replication of primary and two secondary's
+      include_tasks: "Replicaset-PSS.yml"
+      when:
+        - "'primary' in groups"
+        - "'secondary' in groups"
+        - "'secondary2' in groups"
+        - "'arbiter' not in groups"
+        - "'percona' not in groups"
+      tags: ["replication", "pss"]
+
+    #Setup replication: percona_primary + percona_secondary + percona_secondary2 (Percona-only PSS)
+    - name: Setting up Percona-only PSS Replication
+      include_tasks: "Replicaset-PSS-Percona.yml"
+      when:
+        - "'percona_primary' in groups"
+        - "'percona_secondary' in groups"
+        - "'percona_secondary2' in groups"
+        - "'primary' not in groups"
+        - "'percona_arbiter' not in groups"
+      tags: ["replication", "pss", "percona"]
+
+    #Setup replication: percona_primary + percona_secondary + percona_arbiter (Percona-only PSA)
+    - name: Setting up Percona-only PSA Replication
+      include_tasks: "Replicaset-PSA-Percona.yml"
+      when:
+        - "'percona_primary' in groups"
+        - "'percona_secondary' in groups"
+        - "'percona_arbiter' in groups"
+        - "'primary' not in groups"
+        - "'percona_secondary2' not in groups"
+      tags: ["replication", "psa", "percona"]
+
+    #Setup replication: percona_primary + secondary + secondary2 (Mixed PSS)
+    - name: Setting up Mixed PSS Replication (Percona primary + Community secondaries)
+      include_tasks: "Replicaset-Mixed-PSS.yml"
+      when:
+        - "'percona_primary' in groups"
+        - "'secondary' in groups"
+        - "'secondary2' in groups"
+        - "'primary' not in groups"
+        - "'percona_secondary' not in groups"
+      tags: ["replication", "pss", "mixed"]
+
+    #Setup replication of primary, secondary, and arbiter
+    - name: Setting up Replication of primary, secondary, and arbiter
+      include_tasks: "Replicaset-Arbiter.yml"
+      when:
+        - "'arbiter' in groups"
+        - "'primary' in groups"
+        - "'secondary' in groups"
+        - "'secondary2' not in groups"
+      tags: ["replication", "arbiter"]
+
+    #Setup replication of primary and one secondary and one percona
+    - name: Setting up Replication of primary and one secondary and one percona
+      include_tasks: "Replicaset-PSP.yml"
+      when:
+        - "'primary' in groups"
+        - "'secondary' in groups"
+        - "'percona' in groups"
+      tags: ["replication", "psp"]
+
+    #Setup replication for Single Node Cluster
+    - name: Setting up Replication for Single Node Cluster
+      include_tasks: "Replicaset-Singlenode.yml"
+      when: (single_node_replicaset | bool) and (inventory_hostname in groups.get('primary', []) or inventory_hostname in groups.get('percona_primary', []))
+      tags: ["replication", "single-node"]
+
+    #Standalone setup (no replica set)
+    - name: Configure standalone MongoDB
+      include_tasks: "standalone.yml"
+      when: standalone_mode | bool
+      tags: ["replication", "standalone"]
+
+    #Enable authorization — use standalone template when standalone_mode: true
+    - name: Add mongod conf file with authorization (standalone)
+      template:
+        src: mongo-standalone-auth.conf.j2
+        dest: /etc/mongod.conf
+        owner: "{{ owner }}"
+        group: "{{ group }}"
+        mode: 0644
+      when: standalone_mode | bool
+      tags: ["security", "standalone"]
+
+    - name: Add mongod-replication conf file with authorization (replica set)
+      template:
+        src: mongo-replication.conf.j2
+        dest: /etc/mongod.conf
+        owner: "{{ owner }}"
+        group: "{{ group }}"
+        mode: 0644
+      when: not (standalone_mode | bool)
+      tags: ["security"]
+
+    #Restart with auth
+    - name: Restart mongod service with authorization
+      systemd:
+         name: mongod.service
+         state: restarted
+      tags: ["security"]
+
+    - name: Wait for MongoDB to be ready with authorization
+      wait_for:
+        port: "{{ mongodb_port }}"
+        host: "{{ ansible_default_ipv4.address }}"
+        delay: 5
+        timeout: 50
+      tags: ["security"]
+
+    #Verify authentication
+    - name: Verify authentication is working
+      community.mongodb.mongodb_info:
+        login_user: admin
+        login_password: "{{ admin_password }}"
+        login_database: admin
+        login_host: "{{ ansible_default_ipv4.address }}"
+        login_port: "{{ mongodb_port }}"
+      when: 
+        - inventory_hostname in groups.get('primary', []) or inventory_hostname in groups.get('percona_primary', [])
+      register: auth_verification
+      vars:
+        ansible_python_interpreter: /opt/mongodb-venv/bin/python
+      ignore_errors: true
+      tags: ["validation"]
+
+    - name: Display authentication status
+      debug:
+        msg: "Authentication successfully enabled and verified"
+      when: (inventory_hostname in groups.get('primary', []) or inventory_hostname in groups.get('percona_primary', [])) and auth_verification is succeeded
+      tags: ["validation"]
+
+    #Test authentication
+    - name: Test Authentication & Authorization
+      include_tasks: "test_authentication.yml"
+      when: (inventory_hostname in groups.get('primary', []) or inventory_hostname in groups.get('percona_primary', [])) and auth_verification is succeeded
+      tags: ["validation"]
+      ignore_errors: true
+
+    #Database and user creation
+    - include_tasks: "database-and-user-create.yml"
+      when:
+        - inventory_hostname in groups.get('primary', []) or inventory_hostname in groups.get('percona_primary', [])
+        - auth_verification is succeeded
+        - application_database_create | bool
+      tags: ["config"]
+
+    #Logrotate tasks
+    - name: Test logrotate configuration (dry run)
+      command: logrotate -d /etc/logrotate.d/mongodb.conf
+      register: logrotate_test
+      failed_when: false
+      changed_when: false
+      tags: ["maintenance"]
+
+    - name: Notify about logrotate configuration
+      debug:
+        msg: "Logrotate configuration is {{ 'valid' if logrotate_test.rc == 0 else 'invalid' }}"
+      tags: ["maintenance"]
+
+    - name: Adding logrotate for mongodb.
+      template:
+        src: logrotate.conf.j2
+        dest: /etc/logrotate.d/mongodb.conf
+        owner: root
+        group: root
+        mode: 0644
+      tags: ["maintenance"]
+
+    - name: logrotating mongodb.
+      shell: logrotate -v -f /etc/logrotate.d/mongodb.conf
+      register: logrotate_result
+      ignore_errors: true
+      tags: ["maintenance"]
+
+    - name: Display logrotate result
+      debug:
+        msg: "Logrotate executed successfully: {{ logrotate_result.stdout }}"
+      when: logrotate_result.rc == 0
+      tags: ["maintenance"]
+
+    #Backup setup
+    - name: Include Percona user and role tasks
+      include_tasks: "percona_user_role.yml"
+      when: 
+        - (inventory_hostname in groups.get('primary', []) or inventory_hostname in groups.get('percona_primary', []))
+        - backup_enabled == true
+      tags: ["backup"]
+
+    - name: Include Percona Backup for MongoDB tasks
+      include_tasks: "percona_backup.yml"
+      when: backup_enabled == true
+      tags: ["backup"]
+
+    #Monitoring setup
+    - name: Setup Percona monitoring (mongodb_exporter + node_exporter)
+      include_tasks: "monitoring.yml"
+      when: enable_monitoring | bool
+      tags: ["monitoring"]
+
+    #Notifications
+    - name: Notify on Slack
+      community.general.slack:
+        token: "{{ slack_token }}"
+        msg: "MongoDB deployment completed on *{{ inventory_hostname }}*\n• Replica Set: {{ replicaset_name }}\n• Version: {{ mongodb_version }}\n• Port: {{ mongodb_port }}"
+        channel: "{{ slack_channel | default('') }}"
+        username: "Ansible MongoDB"
+        icon_emoji: ":mongodb:"
+      when: slack_enabled | bool
+      tags: ["notification"]
+
+    #Final Summary Report
+    - include_tasks: "deployment_summary.yml"
+      tags: ["summary", "info"]
