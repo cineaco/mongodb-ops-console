@@ -1,0 +1,27 @@
+---
+# Pure Percona PSS: percona_primary + percona_secondary + percona_secondary2
+- name: Create replicaset {{ replicaset_name }} (Percona PSS)
+  community.mongodb.mongodb_replicaset:
+    login_host: "{{ percona_primary }}"
+    login_port: "{{ mongodb_port }}"
+    replica_set: "{{ replicaset_name }}"
+    members:
+      - host: "{{ percona_primary }}:{{ mongodb_port }}"
+        priority: "{{ percona_primary_priority }}"
+        votes: "{{ percona_primary_votes }}"
+        tags:
+          node: "percona_primary"
+      - host: "{{ percona_secondary }}:{{ mongodb_port }}"
+        priority: "{{ percona_priority }}"
+        votes: "{{ percona_votes }}"
+        tags:
+          node: "percona_secondary"
+      - host: "{{ percona_secondary2 }}:{{ mongodb_port }}"
+        priority: "{{ percona_priority }}"
+        votes: "{{ percona_votes }}"
+        tags:
+          node: "percona_secondary2"
+  when: inventory_hostname in groups.get('percona_primary', [])
+  vars:
+    ansible_python_interpreter: /opt/mongodb-venv/bin/python
+  tags: ["replication", "pss", "percona"]

@@ -1,0 +1,33 @@
+---
+- name: Rolling update strategy for MongoDB cluster
+  block:
+    - name: Step down primary before update
+      community.mongodb.mongodb_stepdown:
+        login_host: "{{ primary }}"
+        login_port: "{{ mongodb_port }}"
+        login_user: admin
+        login_password: "{{ admin_password }}"
+        stepdown_seconds: 60
+      when: inventory_hostname in groups['primary']
+      vars:
+        ansible_python_interpreter: /opt/mongodb-venv/bin/python
+
+    - name: Update secondary nodes first
+      include_tasks: "update-mongodb.yml"
+      when: inventory_hostname in groups['secondary'] or inventory_hostname in groups['hidden'] or inventory_hostname in groups['secondary2']
+
+    - name: Wait for secondary sync
+      community.mongodb.mongodb_status:
+        login_host: "{{ ansible_default_ipv4.address }}"
+        login_port: "{{ mongodb_port }}"
+        replica_set: rs0
+        poll: 30
+        wait_for: "secondary"
+      when: inventory_hostname in groups['secondary']
+      vars:
+        ansible_python_interpreter: /opt/mongodb-venv/bin/python
+
+    - name: Update primary last
+      include_tasks: "update-mongodb.yml"
+      when: inventory_hostname in groups['primary']
+  serial: 1

@@ -1,0 +1,32 @@
+---
+# mongodb_entities role defaults
+#
+# The MongoDB connection is supplied entirely through `mongodb_uri` at runtime
+# (via --extra-vars or an Ansible Vault file). It is intentionally NOT defaulted
+# here so that a missing URI fails loudly rather than connecting somewhere wrong.
+
+# Fallback listen port used only when the URI omits an explicit port.
+mongodb_port: 37017
+
+# Python interpreter that has pymongo installed (provisioned by the `mongodb` role).
+# Used by the community.mongodb modules.
+mongodb_venv_python: /opt/mongodb-venv/bin/python
+
+# Path to the mongo shell used for primary detection (hello/isMaster).
+mongodb_shell_cmd: mongosh
+
+# ---------------------------------------------------------------------------
+# Entity lists — override these via -e @entities.yml. All are optional and
+# default to empty so partial inputs are safe.
+# ---------------------------------------------------------------------------
+
+# Advisory only: databases are NOT materialized (MongoDB drops empty DBs).
+# When non-empty, acts as a typo-guard: every db referenced by a user/role
+# must appear in this list.
+mongodb_databases: []
+
+# Custom roles to create. See entities.example.yml for the schema.
+mongodb_roles: []
+
+# Users to create. See entities.example.yml for the schema.
+mongodb_users: []

@@ -1,0 +1,8 @@
+[Unit]
+Description=Pre-requisites for starting mongodb server
+
+[Service]
+ExecStart=/bin/bash -c 'mkdir -p /var/run/mongodb && chown mongodb. /var/run/mongodb'
+
+[Install]
+WantedBy=multi-user.target

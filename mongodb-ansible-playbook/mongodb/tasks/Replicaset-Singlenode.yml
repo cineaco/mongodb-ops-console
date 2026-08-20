@@ -1,0 +1,15 @@
+- name: Create replicaset {{ replicaset_name }} for Single Node Cluster
+  community.mongodb.mongodb_replicaset:
+    login_host: "{{ ansible_default_ipv4.address }}"
+    login_port: "{{ mongodb_port }}"
+    replica_set: "{{ replicaset_name }}"
+    members:
+      - host: "{{ ansible_default_ipv4.address }}:{{ mongodb_port }}"
+        priority: 1
+        votes: 1
+    validate: no
+  when:
+    - inventory_hostname in groups.get('primary', []) or inventory_hostname in groups.get('percona_primary', [])
+  vars:
+    ansible_python_interpreter: /opt/mongodb-venv/bin/python
+  tags: ["replication", "replicaset-single", "single-node", "all"]

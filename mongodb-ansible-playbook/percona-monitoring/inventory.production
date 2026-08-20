@@ -1,0 +1,17 @@
+[primary]
+primary  ansible_host=10.21.10.116  ansible_port=22 ansible_user=ubuntu ansible_ssh_private_key_file=/home/srisaikarzain/Downloads/floodgate.pem
+
+[secondary]
+#secondary  ansible_host=10.21.33.110  ansible_port=22 ansible_user=ubuntu ansible_ssh_private_key_file=/home/srisaikarzain/Downloads/axis-pehchan-vm-key.pem
+
+[percona]
+#percona-secondary  ansible_host=10.21.33.31  ansible_port=22 ansible_user=ubuntu ansible_ssh_private_key_file=/home/srisaikarzain/Downloads/axis-pehchan-vm-key.pem
+
+# Dedicated host for PMM Server (Docker). Do NOT co-locate with a MongoDB node:
+# it needs its own resources (2+ CPU, 4+ GB RAM, 100+ GB disk for metrics).
+[pmm_server]
+#pmm_server  ansible_host=10.21.10.146  ansible_port=22 ansible_user=ubuntu ansible_ssh_private_key_file=/home/srisaikarzain/Downloads/floodgate.pem
+
+[mongodb:children]
+primary
+mongodb

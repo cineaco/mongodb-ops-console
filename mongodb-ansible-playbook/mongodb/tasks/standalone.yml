@@ -1,0 +1,8 @@
+---
+# Standalone mode: MongoDB runs without any replica set.
+- name: Configure MongoDB for standalone (no replica set)
+  ansible.builtin.debug:
+    msg: "Deploying MongoDB in standalone mode — no replica set will be initialized"
+  when:
+    - inventory_hostname in groups.get('primary', []) or inventory_hostname in groups.get('percona_primary', [])
+  tags: ["replication", "standalone"]

@@ -1,0 +1,33 @@
+---
+- name: MongoDB cluster validation
+  block:
+    - name: Test replica set status
+      community.mongodb.mongodb_status:
+        login_host: "{{ primary }}"
+        login_port: "{{ mongodb_port }}"
+        login_user: admin
+        login_password: "{{ admin_password }}"
+        replica_set: rs0
+      register: rs_status
+      vars:
+        ansible_python_interpreter: /opt/mongodb-venv/bin/python
+
+    - name: Validate data consistency
+      community.mongodb.mongodb_shell:
+        login_host: "{{ primary }}"
+        login_port: "{{ mongodb_port }}"
+        login_user: admin
+        login_password: "{{ admin_password }}"
+        eval: "db.runCommand({dbStats: 1})"
+      register: db_stats
+      vars:
+        ansible_python_interpreter: /opt/mongodb-venv/bin/python
+
+    - name: Performance benchmarking
+      shell: |
+        mongo --host {{ primary }}:{{ mongodb_port }} \
+              --username admin \
+              --password {{ admin_password }} \
+              --eval "db.test.insert({x: Math.random()})" \
+              --quiet
+      register: insert_test

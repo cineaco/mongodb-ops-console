@@ -1,0 +1,8 @@
+db.getSiblingDB("admin").createRole({ "role": "pbmAnyAction",
+      "privileges": [
+         { "resource": { "anyResource": true },
+           "actions": [ "anyAction" ]
+         }
+      ],
+      "roles": []
+   });

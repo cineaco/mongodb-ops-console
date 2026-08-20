@@ -1,0 +1,30 @@
+---
+- name: Download Node Exporter
+  get_url:
+    url: "https://github.com/prometheus/node_exporter/releases/download/v{{ node_exporter_version }}/node_exporter-{{ node_exporter_version }}.linux-amd64.tar.gz"
+    dest: "/tmp/node_exporter.tar.gz"
+
+- name: Extract Node Exporter
+  unarchive:
+    src: "/tmp/node_exporter.tar.gz"
+    dest: /opt
+    remote_src: yes
+    creates: "/opt/node_exporter-{{ node_exporter_version }}.linux-amd64/node_exporter"
+
+- name: Create symlink for Node Exporter
+  file:
+    src: "/opt/node_exporter-{{ node_exporter_version }}.linux-amd64/node_exporter"
+    dest: "/usr/local/bin/node_exporter"
+    state: link
+
+- name: Configure Node Exporter service
+  template:
+    src: node-exporter.service.j2
+    dest: /etc/systemd/system/node-exporter.service
+
+- name: Start and enable Node Exporter
+  systemd:
+    name: node-exporter
+    state: started
+    enabled: yes
+    daemon_reload: yes

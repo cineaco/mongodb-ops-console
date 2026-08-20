@@ -1,0 +1,97 @@
+---
+- name: Setup MongoDB monitoring
+  block:
+    - name: Create monitoring directories
+      file:
+        path: "{{ item }}"
+        state: directory
+        owner: "{{ owner }}"
+        group: "{{ group }}"
+        mode: '0755'
+      loop:
+        - /opt/mongodb-exporter
+        - /var/log/mongodb-monitoring
+        - /etc/prometheus/exporters
+
+    - name: Download MongoDB Exporter
+      get_url:
+        url: "https://github.com/percona/mongodb_exporter/releases/download/v{{ mongodb_exporter_version }}/mongodb_exporter-{{ mongodb_exporter_version }}.linux-amd64.tar.gz"
+        dest: "/tmp/mongodb_exporter.tar.gz"
+        mode: '0644'
+
+    - name: Extract MongoDB Exporter
+      unarchive:
+        src: "/tmp/mongodb_exporter.tar.gz"
+        dest: /opt/mongodb-exporter
+        remote_src: yes
+        owner: "{{ owner }}"
+        group: "{{ group }}"
+        creates: "/opt/mongodb-exporter/mongodb_exporter"
+
+    - name: Create monitoring user for MongoDB
+      community.mongodb.mongodb_user:
+        login_host: "{{ ansible_default_ipv4.address }}"
+        login_port: "{{ mongodb_port }}"
+        login_user: admin
+        login_password: "{{ admin_password }}"
+        database: admin
+        name: monitoring
+        password: "{{ monitoring_password }}"
+        roles:
+          - clusterMonitor
+          - read
+        state: present
+      vars:
+        ansible_python_interpreter: /opt/mongodb-venv/bin/python
+
+    - name: Configure MongoDB Exporter service
+      template:
+        src: mongodb-exporter.service.j2
+        dest: /etc/systemd/system/mongodb-exporter.service
+        mode: '0644'
+      notify: restart mongodb-exporter
+
+    - name: Configure MongoDB Exporter environment
+      template:
+        src: mongodb-exporter.env.j2
+        dest: /etc/default/mongodb-exporter
+        mode: '0600'
+        owner: "{{ owner }}"
+        group: "{{ group }}"
+
+    - name: Start and enable MongoDB Exporter
+      systemd:
+        name: mongodb-exporter
+        state: started
+        enabled: yes
+        daemon_reload: yes
+
+    - name: Setup custom health checks
+      template:
+        src: mongodb-healthcheck.py.j2
+        dest: /usr/local/bin/mongodb-healthcheck.py
+        mode: '0755'
+
+    - name: Install health check dependencies
+      pip:
+        name:
+          - pymongo
+          - requests
+          - psutil
+        state: present
+
+    - name: Setup health check cron job
+      cron:
+        name: "MongoDB health check"
+        minute: "*/5"
+        job: "/usr/local/bin/mongodb-healthcheck.py"
+        user: "{{ owner }}"
+
+    - name: Install Node Exporter for system metrics
+      include_tasks: install-node-exporter.yml
+
+    - name: Configure log rotation for monitoring logs
+      template:
+        src: monitoring-logrotate.conf.j2
+        dest: /etc/logrotate.d/mongodb-monitoring
+        mode: '0644'

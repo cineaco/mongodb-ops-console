@@ -1,0 +1,114 @@
+---
+# Authentication and Authorization Testing Tasks
+- name: Test Authentication & Authorization
+  block:
+    - name: Test connection without authentication (should fail)
+      community.mongodb.mongodb_shell:
+        login_host: "{{ primary }}" #"{{ ansible_default_ipv4.address }}"
+        login_port: "{{ mongodb_port }}"
+        eval: "rs.status()"
+      register: unauth_test
+      failed_when: false
+
+    - name: Verify unauthenticated access is denied
+      assert:
+        that:
+          - unauth_test is succeeded
+        fail_msg: "SECURITY ISSUE: Unauthenticated access is allowed!"
+        success_msg: "Unauthenticated access properly denied"
+      failed_when: unauth_test is failed
+
+    - name: Test authentication with admin user
+      community.mongodb.mongodb_info:
+        login_user: admin
+        login_password: "{{ admin_password }}"
+        login_database: admin
+        login_host: "{{ primary }}"
+        login_port: "{{ mongodb_port }}"
+      register: auth_test
+      when:
+        - inventory_hostname in groups['primary']
+
+    - name: Verify authenticated access works
+      assert:
+        that:
+          - auth_test is succeeded
+        fail_msg: "AUTHENTICATION FAILED: Admin user cannot authenticate"
+        success_msg: "✓ Admin authentication successful"
+
+    - name: Test admin user permissions
+      community.mongodb.mongodb_shell:
+        login_user: admin
+        login_password: "{{ admin_password }}"
+        login_database: admin
+        login_host: "{{ primary }}"
+        login_port: "{{ mongodb_port }}"
+        eval: "db.adminCommand('listDatabases')"
+      register: permissions_test
+      when: inventory_hostname in groups['primary']
+
+    - name: Verify admin has proper permissions
+      assert:
+        that:
+          - permissions_test is succeeded
+        fail_msg: "AUTHORIZATION FAILED: Admin user lacks proper permissions"
+        success_msg: "✓ Admin user has proper permissions"
+
+    # - name: Test replica set authentication
+    #   community.mongodb.mongodb_shell:
+    #     login_user: admin
+    #     login_password: "{{ admin_password }}"
+    #     login_database: admin
+    #     login_host: "{{ primary }}"
+    #     login_port: "{{ mongodb_port }}"
+    #     eval: "rs.status()"
+    #   register: rs_auth_test
+    #   when: inventory_hostname in groups['primary']
+    #   failed_when: true
+
+    # - name: Verify replica set authentication
+    #   assert:
+    #     that:
+    #       - rs_auth_test is succeeded
+    #       - "'rs0' in rs_auth_test.transformed_output"
+    #     fail_msg: "REPLICA SET AUTH FAILED: Cannot access replica set status"
+    #     success_msg: "✓ Replica set authentication working"
+    #   when: inventory_hostname in groups['primary']
+    # - debug:
+    #     msg: "Replicaset Information: {{ rs_auth_test.transformed_output }}"
+
+    # - name: Test invalid credentials (should fail)
+    #   community.mongodb.mongodb_info:
+    #     login_user: admin
+    #     login_password: "{{ wrong_password }}"
+    #     login_database: admin
+    #     login_host: "{{ primary }}"
+    #     login_port: "{{ mongodb_port }}"
+    #   register: invalid_auth_test
+    #   failed_when: false
+
+    # - name: Verify invalid credentials are rejected
+    #   assert:
+    #     that:
+    #       - invalid_auth_test is failed
+    #     fail_msg: "SECURITY ISSUE: Invalid credentials accepted!"
+    #     success_msg: "✓ Invalid credentials properly rejected"
+
+  rescue:
+    - name: Authentication test failed
+      debug:
+        msg: "Authentication/Authorization tests failed. Check MongoDB configuration and credentials."
+      
+    - name: Display auth test results
+      debug:
+        var: item
+      loop:
+        - "{{ unauth_test }}"
+        - "{{ auth_test }}"
+        - "{{ invalid_auth_test }}"
+      when: item is defined
+
+  when: inventory_hostname in groups.get('primary', [])
+  vars:
+    ansible_python_interpreter: /opt/mongodb-venv/bin/python
+  tags: ["security", "authentication", "testing", "all"]

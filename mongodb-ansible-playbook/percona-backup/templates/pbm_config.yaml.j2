@@ -1,0 +1,19 @@
+{% if pbm_storage_type == 's3' %}
+storage:
+  type: s3
+  s3:
+    region: {{ pbm_s3_region }}
+    bucket: {{ pbm_s3_bucket }}
+    prefix: {{ pbm_s3_prefix }}
+{% if pbm_s3_endpoint_url | length > 0 %}
+    endpointUrl: {{ pbm_s3_endpoint_url }}
+{% endif %}
+    credentials:
+      access-key-id: {{ pbm_s3_access_key }}
+      secret-access-key: {{ pbm_s3_secret_key }}
+{% elif pbm_storage_type == 'filesystem' %}
+storage:
+  type: filesystem
+  filesystem:
+    path: {{ pbm_fs_path }}
+{% endif %}

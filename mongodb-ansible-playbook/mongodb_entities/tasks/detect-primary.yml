@@ -1,0 +1,46 @@
+---
+# Local self-identification of the writable primary.
+#
+# Each targeted host asks its OWN mongod `hello().isWritablePrimary`. Exactly one
+# node answers true on a replica set; the single node answers true on a standalone.
+# hello/isMaster is exempt from authentication, so this works whether or not auth
+# is enabled and does not need credentials.
+
+- name: Ask the local mongod whether it is the writable primary
+  ansible.builtin.command:
+    argv:
+      - "{{ mongodb_shell_cmd }}"
+      - "--host"
+      - "127.0.0.1"
+      - "--port"
+      - "{{ mongo_conn.port | string }}"
+      - "--quiet"
+      - "--eval"
+      - "print(db.hello().isWritablePrimary)"
+  register: _hello_result
+  changed_when: false
+  failed_when: _hello_result.rc != 0
+  tags: ["detect"]
+
+- name: Record primary status for this host
+  ansible.builtin.set_fact:
+    is_primary: "{{ (_hello_result.stdout | trim | lower) == 'true' }}"
+  tags: ["detect"]
+
+- name: Fail when no reachable host is the writable primary
+  ansible.builtin.assert:
+    that:
+      - >-
+        ansible_play_hosts
+        | map('extract', hostvars, 'is_primary')
+        | map('default', false)
+        | select
+        | list
+        | length > 0
+    fail_msg: >-
+      No reachable host reported as the MongoDB writable primary. Ensure the
+      deployment has an elected primary and that your inventory includes the
+      current primary node (targeted hosts: {{ ansible_play_hosts | join(', ') }}).
+    success_msg: "Writable primary located among the targeted hosts."
+  run_once: true
+  tags: ["detect"]

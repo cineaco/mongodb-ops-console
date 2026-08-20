@@ -1,0 +1,8 @@
+---
+mongodb_environment: production
+replica_set_size: 5
+enable_sharding: true
+backup_retention_days: 90
+monitoring_level: detailed
+ssl_required: true
+audit_enabled: true

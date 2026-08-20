@@ -1,0 +1,26 @@
+---
+# Pure Percona PSA: percona_primary + percona_secondary + percona_arbiter
+- name: Create replicaset {{ replicaset_name }} (Percona PSA)
+  community.mongodb.mongodb_replicaset:
+    login_host: "{{ percona_primary }}"
+    login_port: "{{ mongodb_port }}"
+    replica_set: "{{ replicaset_name }}"
+    members:
+      - host: "{{ percona_primary }}:{{ mongodb_port }}"
+        priority: "{{ percona_primary_priority }}"
+        votes: "{{ percona_primary_votes }}"
+        tags:
+          node: "percona_primary"
+      - host: "{{ percona_secondary }}:{{ mongodb_port }}"
+        priority: "{{ percona_priority }}"
+        votes: "{{ percona_votes }}"
+        tags:
+          node: "percona_secondary"
+      - host: "{{ percona_arbiter }}:{{ mongodb_port }}"
+        priority: 0
+        votes: 1
+        arbiterOnly: true
+  when: inventory_hostname in groups.get('percona_primary', [])
+  vars:
+    ansible_python_interpreter: /opt/mongodb-venv/bin/python
+  tags: ["replication", "psa", "percona"]

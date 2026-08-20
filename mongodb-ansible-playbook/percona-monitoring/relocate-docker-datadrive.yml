@@ -1,0 +1,72 @@
+---
+# One-time migration: move Docker + containerd storage from the 29 GB root
+# disk to the 100 GB /datadrive volume on the PMM server host, preserving the
+# existing pmm-data volume (old PMM instance data being reused).
+#
+#   ansible-playbook -i inventory.production relocate-docker-datadrive.yml
+#
+# Safe to re-run: every task is guarded by a state check.
+- name: Relocate Docker storage to /datadrive
+  hosts: pmm_server
+  become: yes
+  tasks:
+    - name: Check whether /var/lib/docker is already a symlink
+      ansible.builtin.stat:
+        path: /var/lib/docker
+      register: docker_dir
+
+    - name: Verify /datadrive is a mountpoint
+      ansible.builtin.command: mountpoint -q /datadrive
+      changed_when: false
+
+    - name: Relocate storage
+      when: not docker_dir.stat.islnk
+      block:
+        - name: Stop Docker and containerd
+          ansible.builtin.systemd:
+            name: "{{ item }}"
+            state: stopped
+          loop: [docker.socket, docker, containerd]
+
+        - name: Move /var/lib/docker to /datadrive/docker
+          ansible.builtin.command: mv /var/lib/docker /datadrive/docker
+          args:
+            creates: /datadrive/docker
+
+        - name: Move /var/lib/containerd to /datadrive/containerd
+          ansible.builtin.command: mv /var/lib/containerd /datadrive/containerd
+          args:
+            creates: /datadrive/containerd
+
+        - name: Symlink /var/lib/docker
+          ansible.builtin.file:
+            src: /datadrive/docker
+            dest: /var/lib/docker
+            state: link
+
+        - name: Symlink /var/lib/containerd
+          ansible.builtin.file:
+            src: /datadrive/containerd
+            dest: /var/lib/containerd
+            state: link
+
+      always:
+        - name: Start containerd and Docker
+          ansible.builtin.systemd:
+            name: "{{ item }}"
+            state: started
+          loop: [containerd, docker]
+
+  post_tasks:
+    - name: Verify pmm-data volume survived the move
+      ansible.builtin.command: docker volume inspect pmm-data
+      changed_when: false
+
+    - name: Show disk usage
+      ansible.builtin.command: df -h / /datadrive
+      register: disk_usage
+      changed_when: false
+
+    - name: Report
+      ansible.builtin.debug:
+        msg: "{{ disk_usage.stdout_lines }}"

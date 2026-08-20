@@ -1,0 +1,136 @@
+#!/usr/bin/env python3
+import pymongo
+import json
+import requests
+import time
+import logging
+from datetime import datetime
+
+# Configuration
+MONGODB_URI = "mongodb://monitoring:{{ monitoring_password }}@{{ ansible_default_ipv4.address }}:{{ mongodb_port }}/admin"
+SLACK_WEBHOOK = "{{ slack_token }}"
+LOG_FILE = "/var/log/mongodb-monitoring/healthcheck.log"
+
+# Setup logging
+logging.basicConfig(filename=LOG_FILE, level=logging.INFO, 
+                    format='%(asctime)s - %(levelname)s - %(message)s')
+
+class MongoDBHealthCheck:
+    def __init__(self):
+        self.client = pymongo.MongoClient(MONGODB_URI)
+        self.db = self.client.admin
+        self.alerts = []
+
+    def check_connection(self):
+        """Test MongoDB connection"""
+        try:
+            self.client.admin.command('ismaster')
+            return True
+        except Exception as e:
+            self.alerts.append(f"Connection failed: {str(e)}")
+            return False
+
+    def check_replica_set_status(self):
+        """Check replica set health"""
+        try:
+            rs_status = self.db.command("replSetGetStatus")
+            unhealthy_members = []
+            
+            for member in rs_status['members']:
+                if member['health'] != 1:
+                    unhealthy_members.append(f"{member['name']} - {member['stateStr']}")
+            
+            if unhealthy_members:
+                self.alerts.append(f"Unhealthy replica set members: {', '.join(unhealthy_members)}")
+            
+            return len(unhealthy_members) == 0
+        except Exception as e:
+            self.alerts.append(f"Replica set check failed: {str(e)}")
+            return False
+
+    def check_oplog_window(self):
+        """Check oplog window size"""
+        try:
+            oplog_stats = self.db.command("dbStats", db="local")
+            rs_oplog = self.client.local.oplog.rs
+            
+            first_ts = rs_oplog.find().limit(1).next()['ts']
+            last_ts = rs_oplog.find().sort([('$natural', -1)]).limit(1).next()['ts']
+            
+            window_hours = (last_ts.time - first_ts.time) / 3600
+            
+            if window_hours < {{ oplog_window_threshold | default(24) }}:
+                self.alerts.append(f"Oplog window too small: {window_hours:.2f} hours")
+                return False
+            
+            return True
+        except Exception as e:
+            self.alerts.append(f"Oplog check failed: {str(e)}")
+            return False
+
+    def check_disk_usage(self):
+        """Check disk usage"""
+        try:
+            import psutil
+            disk_usage = psutil.disk_usage('{{ mount_path }}')
+            usage_percent = (disk_usage.used / disk_usage.total) * 100
+            
+            if usage_percent > {{ disk_usage_threshold | default(80) }}:
+                self.alerts.append(f"High disk usage: {usage_percent:.2f}%")
+                return False
+            
+            return True
+        except Exception as e:
+            self.alerts.append(f"Disk usage check failed: {str(e)}")
+            return False
+
+    def send_slack_alert(self, message):
+        """Send alert to Slack"""
+        try:
+            payload = {
+                "text": f"🚨 MongoDB Alert - {{ inventory_hostname }}",
+                "attachments": [{
+                    "color": "danger",
+                    "fields": [{
+                        "title": "Alert Details",
+                        "value": message,
+                        "short": False
+                    }],
+                    "footer": "MongoDB Monitoring",
+                    "ts": int(time.time())
+                }]
+            }
+            
+            response = requests.post(SLACK_WEBHOOK, json=payload)
+            response.raise_for_status()
+            
+        except Exception as e:
+            logging.error(f"Failed to send Slack alert: {str(e)}")
+
+    def run_checks(self):
+        """Run all health checks"""
+        logging.info("Starting MongoDB health checks")
+        
+        checks = [
+            self.check_connection,
+            self.check_replica_set_status,
+            self.check_oplog_window,
+            self.check_disk_usage
+        ]
+        
+        for check in checks:
+            try:
+                check()
+            except Exception as e:
+                self.alerts.append(f"Check {check.__name__} failed: {str(e)}")
+        
+        if self.alerts:
+            alert_message = "\n".join(self.alerts)
+            logging.warning(f"Health check alerts: {alert_message}")
+            self.send_slack_alert(alert_message)
+        else:
+            logging.info("All health checks passed")
+
+if __name__ == "__main__":
+    health_check = MongoDBHealthCheck()
+    health_check.run_checks()

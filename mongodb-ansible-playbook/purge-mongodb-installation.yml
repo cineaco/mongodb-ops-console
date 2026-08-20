@@ -1,0 +1,11 @@
+---
+- name: Purge MongoDB Installation
+  hosts: mongodb-pss
+  become: yes
+  tasks:
+    - name: Stop MongoDB service
+      shell: sudo apt purge -y mongodb-org
+    
+    - name: Remove apt repo
+      shell: |
+        sudo rm -rf /etc/apt/sources.list.d/mongodb-org-8.0.list

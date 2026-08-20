@@ -1,0 +1,51 @@
+---
+  - name: Check if MongoDB repository already exists
+    stat:
+      path: "/etc/yum.repos.d/mongodb-org-{{ mongodb_version }}.repo"
+    register: mongodb_repo_exists
+
+  - name: Create MongoDB repository file
+    copy:
+      dest: "/etc/yum.repos.d/mongodb-org-{{ mongodb_version }}.repo"
+      content: |
+        [mongodb-org-{{ mongodb_version }}]
+        name=MongoDB Repository
+        baseurl=https://repo.mongodb.org/yum/amazon/2/mongodb-org/{{ mongodb_version }}/x86_64/
+        gpgcheck=1
+        enabled=1
+        gpgkey=https://www.mongodb.org/static/pgp/server-{{ mongodb_version }}.asc
+    when: not mongodb_repo_exists.stat.exists
+    register: repo_added
+
+  - name: Check if MongoDB is already installed
+    command: rpm -q mongodb-org
+    register: mongodb_installed
+    failed_when: false
+    changed_when: false
+
+  - name: Installing MongoDB
+    yum:
+      name: mongodb-org
+      state: present
+      update_cache: "{{ repo_added is changed }}"
+    when: mongodb_installed.rc != 0
+
+  - name: Check MongoDB service status
+    systemd:
+      name: mongod
+    register: mongod_service_check
+
+  - name: Starting and enabling MongoDB service
+    systemd:
+      name: mongod
+      state: started
+      enabled: true
+    when: mongod_service_check.status.ActiveState != "active"
+
+  - name: Verifying MongoDB version
+    shell: mongod --version
+    register: mongodb_version_output
+    changed_when: false
+
+  - debug:
+      var: mongodb_version_output.stdout

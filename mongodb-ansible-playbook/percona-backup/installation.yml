@@ -1,0 +1,26 @@
+---
+- name: Percona Backup for MongoDB Installation
+  hosts: all
+  become: yes
+  tasks:
+    - name: Download Percona release package
+      ansible.builtin.get_url:
+        url: https://repo.percona.com/apt/percona-release_latest.generic_all.deb
+        dest: /tmp/percona-release_latest.generic_all.deb
+        mode: "0644"
+
+    - name: Install Percona release package
+      ansible.builtin.apt:
+        deb: /tmp/percona-release_latest.generic_all.deb
+        state: present
+
+    - name: Enable PBM repository
+      ansible.builtin.command: percona-release enable pbm release
+      args:
+        creates: /etc/apt/sources.list.d/percona-pbm-release.list
+
+    - name: Install Percona Backup for MongoDB
+      ansible.builtin.apt:
+        name: percona-backup-mongodb
+        state: present
+        update_cache: yes

@@ -1,0 +1,27 @@
+---
+# Mixed PSS: percona_primary (Percona) + secondary + secondary2 (Community MongoDB)
+- name: Create replicaset {{ replicaset_name }} (Mixed PSS — Percona primary, Community secondaries)
+  community.mongodb.mongodb_replicaset:
+    login_host: "{{ percona_primary }}"
+    login_port: "{{ mongodb_port }}"
+    replica_set: "{{ replicaset_name }}"
+    members:
+      - host: "{{ percona_primary }}:{{ mongodb_port }}"
+        priority: "{{ percona_primary_priority }}"
+        votes: "{{ percona_primary_votes }}"
+        tags:
+          node: "percona_primary"
+      - host: "{{ secondary }}:{{ mongodb_port }}"
+        priority: "{{ secondary_priority }}"
+        votes: "{{ secondary_votes }}"
+        tags:
+          node: "secondary"
+      - host: "{{ secondary2 }}:{{ mongodb_port }}"
+        priority: "{{ secondary2_priority }}"
+        votes: "{{ secondary2_votes }}"
+        tags:
+          node: "secondary2"
+  when: inventory_hostname in groups.get('percona_primary', [])
+  vars:
+    ansible_python_interpreter: /opt/mongodb-venv/bin/python
+  tags: ["replication", "pss", "mixed"]

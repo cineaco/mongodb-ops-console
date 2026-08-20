@@ -1,0 +1,158 @@
+---
+# Percona Backup for MongoDB — full setup
+# Order follows the documented flow: install → pbm user → env var → storage config → agent
+#
+#   ansible-playbook -i inventory.production pbm-setup.yml --ask-vault-pass
+#
+# PBM requires pbm-agent on EVERY non-arbiter mongod node (primary + secondaries).
+
+# ── Play 1: Install PBM on all data-bearing nodes ───────────────────────────
+- name: Install Percona Backup for MongoDB
+  hosts: primary
+  become: yes
+  tasks:
+    - name: Download Percona release package
+      ansible.builtin.get_url:
+        url: https://repo.percona.com/apt/percona-release_latest.generic_all.deb
+        dest: /tmp/percona-release_latest.generic_all.deb
+        mode: "0644"
+
+    - name: Install Percona release package
+      ansible.builtin.apt:
+        deb: /tmp/percona-release_latest.generic_all.deb
+        state: present
+
+    - name: Enable PBM repository
+      ansible.builtin.command: percona-release enable pbm release
+      args:
+        creates: /etc/apt/sources.list.d/percona-pbm-release.list
+
+    - name: Install percona-backup-mongodb
+      ansible.builtin.apt:
+        name: percona-backup-mongodb
+        state: present
+        update_cache: yes
+
+# ── Play 2: Create pbm role + user on the replica set primary ───────────────
+- name: Create PBM user on the primary
+  hosts: primary
+  become: yes
+  vars:
+    mongo_auth: >-
+      --port {{ mongodb_port }}
+      -u {{ mongodb_admin_user }} -p '{{ mongodb_admin_password }}'
+      --authenticationDatabase admin --quiet
+  tasks:
+    - name: Check if pbmAnyAction role exists
+      ansible.builtin.shell: >
+        {{ mongo_shell }} {{ mongo_auth }} --eval
+        'JSON.stringify(db.getSiblingDB("admin").getRole("pbmAnyAction"))'
+      register: pbm_role_check
+      changed_when: false
+      no_log: true
+
+    - name: Create pbmAnyAction role
+      ansible.builtin.shell: |
+        {{ mongo_shell }} {{ mongo_auth }} --eval '
+          db.getSiblingDB("admin").createRole({
+            "role": "pbmAnyAction",
+            "privileges": [
+              { "resource": { "anyResource": true }, "actions": [ "anyAction" ] }
+            ],
+            "roles": []
+          })'
+      when: pbm_role_check.stdout | trim == 'null'
+      no_log: true
+
+    - name: Check if pbm user exists
+      ansible.builtin.shell: >
+        {{ mongo_shell }} {{ mongo_auth }} --eval
+        'JSON.stringify(db.getSiblingDB("admin").getUser("{{ pbm_user }}"))'
+      register: pbm_user_check
+      changed_when: false
+      no_log: true
+
+    - name: Create pbm user
+      ansible.builtin.shell: |
+        {{ mongo_shell }} {{ mongo_auth }} --eval '
+          db.getSiblingDB("admin").createUser({
+            "user": "{{ pbm_user }}",
+            "pwd": "{{ pbm_password }}",
+            "roles": [
+              { "db": "admin", "role": "readWrite", "collection": "" },
+              { "db": "admin", "role": "backup" },
+              { "db": "admin", "role": "clusterMonitor" },
+              { "db": "admin", "role": "restore" },
+              { "db": "admin", "role": "pbmAnyAction" }
+            ]
+          })'
+      when: pbm_user_check.stdout | trim == 'null'
+      no_log: true
+
+# ── Play 3: Environment variable, storage config, start agent ───────────────
+- name: Configure and start pbm-agent
+  hosts: primary
+  become: yes
+  tasks:
+    - name: Set PBM_MONGODB_URI in /etc/default/pbm-agent
+      ansible.builtin.template:
+        src: templates/pbm-agent.env.j2
+        dest: /etc/default/pbm-agent
+        owner: root
+        group: root
+        mode: "0600"
+      notify: Restart pbm-agent
+
+    - name: Create /etc/pbm directory
+      ansible.builtin.file:
+        path: "{{ pbm_config_path | dirname }}"
+        state: directory
+        mode: "0700"
+
+    - name: Render PBM storage config
+      ansible.builtin.template:
+        src: templates/pbm_config.yaml.j2
+        dest: "{{ pbm_config_path }}"
+        owner: root
+        group: root
+        mode: "0600"
+      register: pbm_config_file
+
+    - name: Apply PBM storage config (once per cluster)
+      ansible.builtin.command: pbm config --file {{ pbm_config_path }}
+      environment:
+        PBM_MONGODB_URI: "{{ pbm_mongodb_uri }}"
+      run_once: true
+      when: pbm_config_file.changed or (pbm_force_config | default(false))
+      no_log: true
+      notify: Restart pbm-agent
+
+    - name: Enable and start pbm-agent
+      ansible.builtin.systemd:
+        name: pbm-agent
+        state: started
+        enabled: yes
+
+  post_tasks:
+    - name: Flush handlers so agents restart before status check
+      ansible.builtin.meta: flush_handlers
+
+    - name: Verify PBM status
+      ansible.builtin.command: pbm status
+      environment:
+        PBM_MONGODB_URI: "{{ pbm_mongodb_uri }}"
+      register: pbm_status
+      run_once: true
+      changed_when: false
+      failed_when: false
+
+    - name: Show PBM status
+      ansible.builtin.debug:
+        msg: "{{ pbm_status.stdout_lines | default(pbm_status.stderr_lines) }}"
+      run_once: true
+
+  handlers:
+    - name: Restart pbm-agent
+      ansible.builtin.systemd:
+        name: pbm-agent
+        state: restarted

@@ -1,0 +1,24 @@
+---
+# Create MongoDB databases (implied), users, and custom roles on an existing
+# deployment described by a connection URI.
+#
+# Runs on the DB hosts via inventory. Each host self-identifies whether it is the
+# writable primary; only that node performs the creates. Works for both standalone
+# and replica-set URIs.
+#
+# Usage:
+#   ansible-playbook -i inventory/ mongodb-create-entities.yml \
+#     -e @entities.yml \
+#     -e mongodb_uri='mongodb://admin:pw@h1:37017,h2:37017,h3:37017/?replicaSet=rs0&authSource=admin'
+#
+# Narrow the scope (e.g. when you know the primary) with:
+#   -e mongo_target_hosts=primary
+#
+# See docs/CREATE_ENTITIES.md for the full data model and examples.
+
+- name: Create MongoDB entities (databases/users/roles) from a connection URI
+  hosts: "{{ mongo_target_hosts | default('all') }}"
+  gather_facts: false
+  become: true
+  roles:
+    - mongodb_entities

@@ -1,0 +1,347 @@
+---
+# MongoDB Deployment Summary Report
+# This task generates a comprehensive summary of what was accomplished
+
+- name: Initialize summary variables
+  set_fact:
+    deployment_summary: {}
+    installation_details: {}
+    configuration_details: {}
+    replication_details: {}
+    security_details: {}
+    backup_details: {}
+    maintenance_details: {}
+  tags: ["summary"]
+
+- name: Gather MongoDB installation details
+  set_fact:
+    installation_details:
+      mongodb_type: "{{ 'Percona Server for MongoDB' if (inventory_hostname in groups.get('percona', []) or inventory_hostname in groups.get('percona_primary', [])) else 'Community MongoDB' }}"
+      mongodb_version: "{{ mongodb_version }}"
+      installed_on: "{{ ansible_os_family }} {{ ansible_distribution }} {{ ansible_distribution_version }}"
+      installation_path: "/usr/bin/mongod"
+      config_file: "/etc/mongod.conf"
+      data_directory: "{{ dbPath }}"
+      log_directory: "{{ logDir }}"
+  tags: ["summary"]
+
+- name: Check MongoDB service status
+  systemd:
+    name: mongod
+  register: mongodb_service_status
+  ignore_errors: true
+  tags: ["summary"]
+
+- name: Validate MongoDB installation
+  block:
+    - name: Check if MongoDB binary exists
+      stat:
+        path: /usr/bin/mongod
+      register: mongod_binary
+      
+    - name: Test MongoDB connection
+      shell: |
+        timeout 10 mongo --quiet --eval "print('Connection successful')" {{ ansible_default_ipv4.address }}:{{ mongodb_port }}
+      register: connection_test
+      ignore_errors: true
+      
+    - name: Check MongoDB log for recent errors
+      shell: |
+        if [ -f {{ logpath }} ]; then
+          tail -20 {{ logpath }} | grep -i "error\|exception\|fatal" | wc -l
+        else
+          echo "0"
+        fi
+      register: log_errors
+      ignore_errors: true
+      
+    - name: Set validation results
+      set_fact:
+        validation_results:
+          binary_exists: "{{ mongod_binary.stat.exists }}"
+          service_active: "{{ mongodb_service_status.status.ActiveState == 'active' if mongodb_service_status.status is defined else false }}"
+          connection_successful: "{{ connection_test.rc == 0 if connection_test.rc is defined else false }}"
+          error_count: "{{ log_errors.stdout | int }}"
+          overall_health: "{{ 'Healthy' if (mongod_binary.stat.exists and (mongodb_service_status.status.ActiveState == 'active' if mongodb_service_status.status is defined else false) and (connection_test.rc == 0 if connection_test.rc is defined else false) and (log_errors.stdout | int == 0)) else 'Issues Detected' }}"
+  tags: ["summary"]
+
+- name: Gather network configuration
+  set_fact:
+    network_config:
+      bind_ip: "127.0.0.1,{{ vm_ip | default(ansible_default_ipv4.address) }}"
+      port: "{{ mongodb_port }}"
+      private_ip: "{{ ansible_default_ipv4.address }}"
+      hostname: "{{ inventory_hostname }}"
+  tags: ["summary"]
+
+- name: Determine replication setup
+  set_fact:
+    replication_setup: |
+      {% if 'primary' in groups and 'secondary' in groups and 'secondary2' in groups %}
+      Primary-Secondary-Secondary (PSS) Replica Set
+      {% elif 'arbiter' in groups and 'primary' in groups and 'secondary' in groups %}
+      Primary-Secondary-Arbiter Replica Set
+      {% elif 'primary' in groups and 'secondary' in groups and 'percona' in groups %}
+      Primary-Secondary-Percona (PSP) Replica Set
+      {% elif single_node_replicaset is defined and single_node_replicaset %}
+      Single Node Replica Set
+      {% else %}
+      Standalone Instance
+      {% endif %}
+  tags: ["summary"]
+
+- name: Gather replication details
+  set_fact:
+    replication_details:
+      replica_set_name: "{{ replicaset_name | default('Not configured') }}"
+      setup_type: "{{ replication_setup.strip() }}"
+      node_role: |
+        {% if inventory_hostname in groups.get('primary', []) or inventory_hostname in groups.get('percona_primary', []) %}
+        Primary
+        {% elif inventory_hostname in groups.get('secondary', []) %}
+        Secondary
+        {% elif inventory_hostname in groups.get('secondary2', []) %}
+        Secondary2
+        {% elif inventory_hostname in groups.get('arbiter', []) %}
+        Arbiter
+        {% elif inventory_hostname in groups.get('percona', []) %}
+        Percona Secondary
+        {% else %}
+        Standalone
+        {% endif %}
+      priority: |
+        {% if inventory_hostname in groups.get('primary', []) or inventory_hostname in groups.get('percona_primary', []) %}
+        {{ primary_priority | default('Not set') }}
+        {% elif inventory_hostname in groups.get('secondary', []) %}
+        {{ secondary_priority | default('Not set') }}
+        {% elif inventory_hostname in groups.get('secondary2', []) %}
+        {{ secondary2_priority | default('Not set') }}
+        {% else %}
+        Not applicable
+        {% endif %}
+  tags: ["summary"]
+
+- name: Check authentication status
+  community.mongodb.mongodb_info:
+    login_user: admin
+    login_password: "{{ admin_password }}"
+    login_database: admin
+    login_host: "{{ ansible_default_ipv4.address }}"
+    login_port: "{{ mongodb_port }}"
+  register: auth_check
+  ignore_errors: true
+  vars:
+    ansible_python_interpreter: /opt/mongodb-venv/bin/python
+  when: inventory_hostname in groups.get('primary', []) or inventory_hostname in groups.get('percona_primary', [])
+  tags: ["summary"]
+
+- name: Gather security details
+  set_fact:
+    security_details:
+      authentication: "{{ 'Enabled' if (auth_check is defined and auth_check is succeeded) else 'Disabled/Not tested' }}"
+      authorization: "{{ 'Enabled' if (admin_password is defined and admin_password != '') else 'Disabled' }}"
+      admin_user_created: "{{ 'Yes' if (inventory_hostname in groups.get('primary', []) or inventory_hostname in groups.get('percona_primary', [])) else 'No - Only on Primary' }}"
+      ssl_enabled: "Disabled"
+      keyfile_auth: "{{ 'Enabled' if (keyFile is defined and keyFile != '') else 'Disabled' }}"
+  tags: ["summary"]
+
+- name: Check backup configuration
+  stat:
+    path: /etc/pbm
+  register: pbm_config
+  tags: ["summary"]
+
+- name: Gather backup details
+  set_fact:
+    backup_details:
+      backup_enabled: "{{ backup_enabled | default(false) }}"
+      percona_backup_manager: "{{ 'Installed' if pbm_config.stat.exists else 'Not installed' }}"
+      backup_user_created: "{{ 'Yes' if (backup_enabled | default(false) and (inventory_hostname in groups.get('primary', []) or inventory_hostname in groups.get('percona_primary', []))) else 'No' }}"
+  tags: ["summary"]
+
+- name: Check logrotate configuration
+  stat:
+    path: /etc/logrotate.d/mongodb.conf
+  register: logrotate_config
+  tags: ["summary"]
+
+- name: Check monitoring setup
+  stat:
+    path: /opt/mongodb_exporter
+  register: mongodb_exporter
+  tags: ["summary"]
+
+- name: Gather maintenance details
+  set_fact:
+    maintenance_details:
+      logrotate_configured: "{{ 'Yes' if logrotate_config.stat.exists else 'No' }}"
+      monitoring_exporter: "{{ 'Installed' if mongodb_exporter.stat.exists else 'Not installed' }}"
+      python_venv: "{{ 'Created at /opt/mongodb-venv' if ansible_stat.stat.exists | default(false) else 'Not created' }}"
+  tags: ["summary"]
+
+- name: Get disk usage for MongoDB data directory
+  shell: |
+    if [ -d "{{ dbPath }}" ]; then
+      df -h "{{ dbPath }}" | tail -1 | awk '{print $2" total, "$3" used, "$4" available"}'
+    else
+      echo "Directory not found"
+    fi
+  register: disk_usage
+  ignore_errors: true
+  tags: ["summary"]
+
+- name: Get MongoDB process information
+  shell: |
+    if pgrep mongod > /dev/null; then
+      ps aux | grep mongod | grep -v grep | awk '{print "PID: "$2", Memory: "$4"%"}'
+    else
+      echo "MongoDB process not running"
+    fi
+  register: process_info
+  ignore_errors: true
+  tags: ["summary"]
+
+- name: Display comprehensive deployment summary
+  debug:
+    msg: |
+      
+      ==========================================
+      🍃 MONGODB DEPLOYMENT SUMMARY REPORT 🍃
+      ==========================================
+      
+      📋 BASIC INFORMATION
+      ├─ Hostname: {{ inventory_hostname }}
+      ├─ IP Address: {{ network_config.private_ip }}
+      ├─ Operating System: {{ installation_details.installed_on }}
+      └─ Deployment Time: {{ ansible_date_time.iso8601 }}
+      
+      📦 INSTALLATION DETAILS
+      ├─ MongoDB Type: {{ installation_details.mongodb_type }}
+      ├─ Version: {{ installation_details.mongodb_version }}
+      ├─ Installation Path: {{ installation_details.installation_path }}
+      ├─ Configuration File: {{ installation_details.config_file }}
+      ├─ Data Directory: {{ installation_details.data_directory }}
+      ├─ Log Directory: {{ installation_details.log_directory }}
+      └─ Service Status: {{ mongodb_service_status.status.ActiveState | default('Unknown') }}
+      
+      🌐 NETWORK CONFIGURATION
+      ├─ Bind IP: {{ network_config.bind_ip }}
+      ├─ Port: {{ network_config.port }}
+      └─ Accessible From: {{ 'All interfaces' if network_config.bind_ip == '0.0.0.0' else 'Localhost only' if network_config.bind_ip == '127.0.0.1' else 'Specific interface' }}
+      
+      🔄 REPLICATION SETUP
+      ├─ Configuration: {{ replication_details.setup_type }}
+      ├─ Replica Set Name: {{ replication_details.replica_set_name }}
+      ├─ Node Role: {{ replication_details.node_role.strip() }}
+      └─ Priority: {{ replication_details.priority.strip() }}
+      
+      🔐 SECURITY CONFIGURATION
+      ├─ Authentication: {{ security_details.authentication }}
+      ├─ Authorization: {{ security_details.authorization }}
+      ├─ Admin User: {{ security_details.admin_user_created }}
+      ├─ SSL/TLS: {{ security_details.ssl_enabled }}
+      └─ Keyfile Auth: {{ security_details.keyfile_auth }}
+      
+      💾 BACKUP CONFIGURATION
+      ├─ Backup Enabled: {{ backup_details.backup_enabled }}
+      ├─ Percona Backup Manager: {{ backup_details.percona_backup_manager }}
+      └─ Backup User Created: {{ backup_details.backup_user_created }}
+      
+      🔧 MAINTENANCE & MONITORING
+      ├─ Logrotate Configured: {{ maintenance_details.logrotate_configured }}
+      ├─ MongoDB Exporter: {{ maintenance_details.monitoring_exporter }}
+      └─ Python Virtual Env: {{ maintenance_details.python_venv }}
+      
+      💽 SYSTEM RESOURCES
+      ├─ Disk Usage: {{ disk_usage.stdout | default('Unable to determine') }}
+      └─ Process Info: {{ process_info.stdout | default('Unable to determine') }}
+      
+      🔍 VALIDATION RESULTS
+      ├─ Binary Exists: {{ '✅ Yes' if validation_results.binary_exists else '❌ No' }}
+      ├─ Service Running: {{ '✅ Active' if validation_results.service_active else '❌ Inactive' }}
+      ├─ Connection Test: {{ '✅ Success' if validation_results.connection_successful else '❌ Failed' }}
+      ├─ Recent Errors: {{ validation_results.error_count }} found in logs
+      └─ Overall Health: {{ '✅ ' + validation_results.overall_health if validation_results.overall_health == 'Healthy' else '⚠️ ' + validation_results.overall_health }}
+      
+      ==========================================
+      {{ '✅ DEPLOYMENT COMPLETED SUCCESSFULLY!' if validation_results.overall_health == 'Healthy' else '⚠️ DEPLOYMENT COMPLETED WITH ISSUES!' }}
+      ==========================================
+      
+  tags: ["summary"]
+  run_once: false
+
+- name: Display cluster overview (run once)
+  debug:
+    msg: |
+      
+      🏗️  MONGODB CLUSTER OVERVIEW
+      ====================================
+      
+      Cluster Members:
+      {% for host in groups.get('mongodb-pss', groups.get('primary', []) + groups.get('secondary', []) + groups.get('secondary2', []) + groups.get('percona_primary', []) + groups.get('percona', []) + groups.get('arbiter', [])) %}
+      {% set host_ip = hostvars[host]['ansible_default_ipv4']['address'] | default(hostvars[host]['ansible_host']) %}
+      {% set host_role = 'Primary' if host in groups.get('primary', []) or host in groups.get('percona_primary', []) 
+                        else 'Secondary' if host in groups.get('secondary', []) 
+                        else 'Secondary2' if host in groups.get('secondary2', [])
+                        else 'Arbiter' if host in groups.get('arbiter', [])
+                        else 'Percona Secondary' if host in groups.get('percona', [])
+                        else 'Unknown' %}
+      ├─ {{ host }} ({{ host_ip }}) - {{ host_role }}
+      {% endfor %}
+      
+      🔗 Connection Commands:
+      ├─ Direct Connection: mongo {{ network_config.private_ip }}:{{ network_config.port }}
+      {% if replication_details.replica_set_name != 'Not configured' %}
+      ├─ Replica Set Connection: mongo "mongodb://{{ groups.get('primary', [groups.mongodb-pss[0]] if groups.get('mongodb-pss') else ['localhost'])[0] }}:{{ network_config.port }}/admin?replicaSet={{ replication_details.replica_set_name }}"
+      {% endif %}
+      {% if security_details.authentication == 'Enabled' %}
+      └─ Authenticated Connection: mongo "mongodb://admin:PASSWORD@{{ network_config.private_ip }}:{{ network_config.port }}/admin"
+      {% endif %}
+      
+      📝 Next Steps:
+      ├─ Verify cluster status: rs.status()
+      ├─ Check replica set config: rs.conf()
+      ├─ Monitor logs: tail -f {{ installation_details.log_directory }}/mongod.log
+      └─ Test authentication: db.runCommand({connectionStatus: 1})
+      
+      ====================================
+      
+  tags: ["summary"]
+  run_once: true
+  when: inventory_hostname in groups.get('primary', []) or inventory_hostname in groups.get('percona_primary', [])
+
+- name: Save deployment summary to file
+  copy:
+    content: |
+      MongoDB Deployment Summary - {{ ansible_date_time.iso8601 }}
+      ================================================================
+      
+      Host: {{ inventory_hostname }} ({{ network_config.private_ip }})
+      MongoDB Type: {{ installation_details.mongodb_type }}
+      Version: {{ installation_details.mongodb_version }}
+      Operating System: {{ installation_details.installed_on }}
+      
+      Replication: {{ replication_details.setup_type }}
+      Node Role: {{ replication_details.node_role.strip() }}
+      Replica Set: {{ replication_details.replica_set_name }}
+      
+      Security:
+      - Authentication: {{ security_details.authentication }}
+      - Authorization: {{ security_details.authorization }}
+      - Admin User: {{ security_details.admin_user_created }}
+      
+      Network:
+      - Bind IP: {{ network_config.bind_ip }}
+      - Port: {{ network_config.port }}
+      
+      Backup: {{ backup_details.backup_enabled }}
+      Monitoring: {{ maintenance_details.monitoring_exporter }}
+      Logrotate: {{ maintenance_details.logrotate_configured }}
+      
+      Service Status: {{ mongodb_service_status.status.ActiveState | default('Unknown') }}
+      Disk Usage: {{ disk_usage.stdout | default('Unknown') }}
+      
+      Deployment completed at: {{ ansible_date_time.iso8601 }}
+    dest: "/tmp/mongodb_deployment_summary_{{ inventory_hostname }}_{{ ansible_date_time.epoch }}.txt"
+    mode: '0644'
+  tags: ["summary"]

@@ -1,0 +1,26 @@
+---
+- name: Create application "{{ application_database }}" and user "{{ application_user }}"
+  community.mongodb.mongodb_user:
+    login_host: "{{ ansible_default_ipv4.address }}"
+    login_port: "{{ mongodb_port }}"
+    login_user: "{{ admin_username }}"
+    login_password: "{{ admin_password }}"
+    login_database: admin
+    database: "{{ application_database }}"
+    name: "{{ application_user }}"
+    password: "{{ application_password }}"
+    roles: "{{ application_role }}"
+    state: present
+  register: app_user_result
+  vars:
+    ansible_python_interpreter: /opt/mongodb-venv/bin/python
+  when: inventory_hostname in groups.get('primary', []) or inventory_hostname in groups.get('percona_primary', [])
+  tags: ["config"]
+
+- name: Verify application user created successfully
+  debug:
+    msg: "Application user '{{ application_user }}' created in database '{{ application_database }}'"
+  when:
+    - (inventory_hostname in groups.get('primary', []) or inventory_hostname in groups.get('percona_primary', []))
+    - app_user_result is succeeded
+  tags: ["config"]

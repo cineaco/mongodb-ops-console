@@ -1,0 +1,22 @@
+[Unit]
+Description=MongoDB Exporter
+After=network.target
+
+[Service]
+Type=simple
+User={{ owner }}
+Group={{ group }}
+EnvironmentFile=/etc/default/mongodb-exporter
+ExecStart=/opt/mongodb-exporter/mongodb_exporter \
+    --mongodb.uri="mongodb://monitoring:{{ monitoring_password }}@{{ ansible_default_ipv4.address }}:{{ mongodb_port }}/admin" \
+    --web.listen-address=":9216" \
+    --web.telemetry-path="/metrics" \
+    --log.level=info \
+    --collect-all
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

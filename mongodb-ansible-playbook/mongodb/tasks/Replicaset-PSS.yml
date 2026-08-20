@@ -1,0 +1,26 @@
+---
+- name: Create replicaset rs0 
+  community.mongodb.mongodb_replicaset:
+    login_host: "{{ primary }}"
+    login_port: "{{ mongodb_port }}"
+    replica_set: "{{ replicaset_name }}"
+    members:
+    - host: "{{ primary }}:{{ mongodb_port }}"
+      priority: "{{ primary_priority }}"
+      votes: 1
+      tags:
+        node: "primary"
+    - host: "{{ secondary }}:{{ mongodb_port }}"
+      priority: "{{ secondary_priority }}"
+      votes: "{{ secondary_votes }}"
+      tags:
+        node: "secondary"
+    - host: "{{ secondary2 }}:{{ mongodb_port }}"
+      priority: "{{ secondary2_priority }}"
+      votes: "{{ secondary2_votes }}"
+      tags:
+        node: "secondary2"
+  when: inventory_hostname in groups.get('primary', []) or inventory_hostname in groups.get('percona_primary', [])
+  vars:
+    ansible_python_interpreter: /opt/mongodb-venv/bin/python
+  tags: ["replication", "pss"]

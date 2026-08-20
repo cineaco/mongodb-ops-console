@@ -1,0 +1,134 @@
+---
+  - name: Check if libssl1.1 is already installed
+    command: dpkg -l libssl1.1
+    register: libssl_check
+    failed_when: false
+    changed_when: false
+    when: ansible_distribution == "Ubuntu" and (ansible_distribution_version == "20.04" or ansible_distribution_version == "22.04")
+    tags: ["install", "community-setup", "setup", "all"]
+
+  - name: Add focal-security repository for libssl1.1
+    apt_repository:
+      repo: "deb http://security.ubuntu.com/ubuntu focal-security main"
+      filename: focal-security
+      state: present
+      update_cache: no
+    when: ansible_distribution == "Ubuntu" and (ansible_distribution_version == "20.04" or ansible_distribution_version == "22.04") and libssl_check.rc != 0
+    register: focal_repo_added
+    tags: ["install", "community-setup", "setup", "all"]
+
+  - name: Install required packages
+    apt:
+      name:
+        - libssl1.1
+      state: present
+      update_cache: "{{ focal_repo_added is changed }}"
+    when: ansible_distribution == "Ubuntu" and (ansible_distribution_version == "20.04" or ansible_distribution_version == "22.04")
+    tags: ["install", "community-setup", "setup", "all"]
+
+  - name: Install libssl3 package
+    apt:
+      name:
+        - libssl3
+      state: present
+      update_cache: "{{ focal_repo_added is changed }}"
+    when: ansible_distribution == "Ubuntu" and ansible_distribution_version == "24.04"
+    tags: ["install", "community-setup", "setup", "all"]
+
+  - name: Install required packages
+    apt:
+      name:
+        - curl
+        - gnupg
+        - wget
+      state: present
+      update_cache: "{{ focal_repo_added is changed }}"
+    tags: ["install", "community-setup", "setup", "all"]
+
+  - name: Check if MongoDB GPG key already exists
+    stat:
+      path: "/usr/share/keyrings/mongodb-server-{{ mongodb_version }}.gpg"
+    register: mongodb_key_exists
+    tags: ["install", "community-setup", "setup", "all"]
+
+  - name: Adding MongoDB public GPG key
+    get_url:
+      url: "https://www.mongodb.org/static/pgp/server-{{ mongodb_version }}.asc"
+      dest: "/tmp/mongodb-server-{{ mongodb_version }}.asc"
+      mode: '0644'
+    when: not mongodb_key_exists.stat.exists
+    tags: ["install", "community-setup", "setup", "all"]
+
+  - name: Import MongoDB GPG key
+    shell: gpg --dearmor < /tmp/mongodb-server-{{ mongodb_version }}.asc > /usr/share/keyrings/mongodb-server-{{ mongodb_version }}.gpg
+    when: not mongodb_key_exists.stat.exists
+    tags: ["install", "community-setup", "setup", "all"]
+
+  - name: Clean up temporary GPG key file
+    file:
+      path: "/tmp/mongodb-server-{{ mongodb_version }}.asc"
+      state: absent
+    when: not mongodb_key_exists.stat.exists
+    tags: ["install", "community-setup", "setup", "all"]
+
+  - name: Check if MongoDB repository already exists
+    stat:
+      path: "/etc/apt/sources.list.d/mongodb-org-{{ mongodb_version }}.list"
+    register: mongodb_repo_exists
+    tags: ["install", "community-setup", "setup", "all"]
+
+  - name: Create the MongoDB repository
+    apt_repository:
+      repo: "deb [ arch=amd64,arm64 signed-by=/usr/share/keyrings/mongodb-server-{{ mongodb_version }}.gpg ] https://repo.mongodb.org/apt/ubuntu {{ 'noble' if mongodb_version == '8.0' else 'jammy' }}/mongodb-org/{{ mongodb_version }} multiverse"
+      filename: "mongodb-org-{{ mongodb_version }}"
+      state: present
+      update_cache: no
+    when: not mongodb_repo_exists.stat.exists
+    register: repo_added
+    tags: ["install", "community-setup", "setup", "all"]
+
+  - name: Update apt cache only if repository was added
+    apt:
+      update_cache: yes
+    when: repo_added is changed
+    tags: ["install", "community-setup", "setup", "all"]
+
+  - name: Check if MongoDB is already installed
+    command: dpkg -l mongodb-org
+    register: mongodb_installed
+    failed_when: false
+    changed_when: false
+    tags: ["install", "community-setup", "setup", "all"]
+
+  - name: Installing MongoDB
+    apt:
+      name: mongodb-org
+      state: present
+    when: mongodb_installed.rc != 0
+    tags: ["install", "community-setup", "setup", "all"]
+
+  - name: Check MongoDB service status
+    systemd:
+      name: mongod
+    register: mongod_service_check
+    tags: ["install", "community-setup", "setup", "all"]
+
+  - name: Starting and enabling MongoDB service
+    systemd:
+      name: mongod
+      state: started
+      enabled: true
+    when: mongod_service_check.status.ActiveState != "active"
+    tags: ["install", "community-setup", "setup", "all"]
+  
+  - name: Verifying MongoDB version
+    shell: mongod --version
+    register: mongod_version
+    changed_when: false
+    tags: ["install", "community-setup", "setup", "all"]
+    
+
+  # Debugging the MongoDB version
+  - debug:
+      var: mongod_version.stdout
+    tags: ["install", "community-setup", "setup", "all"]

@@ -1,0 +1,330 @@
+- name: Validate MongoDB version variable
+  fail:
+    msg: "mongodb_version must be defined and one of: 5.0, 6.0, 7.0, 8.0"
+  when: mongodb_version is not defined or mongodb_version not in ['5.0', '6.0', '7.0', '8.0']
+  tags: ["config"]
+
+- name: Remove broken shim-signed package if present (EC2 — no UEFI secure boot needed)
+  shell: dpkg --remove --force-remove-reinstreq shim-signed 2>/dev/null || true
+  changed_when: false
+  tags: ["config"]
+
+- name: Install required system packages for virtual environment
+  apt:
+    name: 
+      - python3-pip
+      - python3-venv
+      - python3-requests
+    state: present
+  tags: ["config"]
+
+- name: Create virtual environment for MongoDB management
+  shell: python3 -m venv /opt/mongodb-venv
+  args:
+    creates: /opt/mongodb-venv/bin/activate
+  tags: ["config"]
+
+- name: Install required Python packages in virtual environment
+  pip:
+    name:
+      - pymongo>=4.0
+      - dnspython
+    state: present
+    virtualenv: /opt/mongodb-venv
+    virtualenv_command: python3 -m venv
+  tags: ["config"]
+
+- name: Set proper permissions on virtual environment
+  file:
+    path: /opt/mongodb-venv
+    owner: root
+    group: root
+    mode: '0755'
+    recurse: yes
+  tags: ["config"]
+
+- name: Check if MongoDB is installed
+  command: mongod --version
+  register: mongodb_installed_check
+  failed_when: false
+  changed_when: false
+  tags: ["config"]
+
+- name: Verify correct MongoDB version is installed
+  fail:
+    msg: "Required MongoDB version {{ mongodb_version }} is not installed. Found: {{ mongodb_installed_check.stdout }}"
+  when: 
+    - mongodb_installed_check.rc == 0
+    - mongodb_version not in mongodb_installed_check.stdout
+  tags: ["config"]
+
+- name: Set private IP from Ansible facts
+  set_fact:
+    vm_ip: "{{ ansible_default_ipv4.address }}"
+  tags: ["config"]
+
+- name: Creating directories with proper ownership
+  file:
+    path: "{{ item }}"
+    state: directory
+    recurse: true
+    owner: "{{ owner }}"
+    group: "{{ group }}"
+    mode: '0755'
+  loop:
+    - "{{ mount_path }}"
+  tags: ["config"]
+
+# ------- EXTERNAL VOLUME SETUP (skipped when enable_external_volume: false) -------
+- name: Check if mount path is already mounted
+  command: mountpoint -q "{{ mount_path }}"
+  register: mount_check_initial
+  failed_when: false
+  changed_when: false
+  when: enable_external_volume | bool
+  tags: ["config"]
+
+- name: Skip storage setup if already mounted
+  set_fact:
+    skip_storage_setup: "{{ mount_check_initial.rc == 0 }}"
+  when: enable_external_volume | bool
+  tags: ["config"]
+
+- name: Set skip_storage_setup when external volume disabled
+  set_fact:
+    skip_storage_setup: true
+  when: not (enable_external_volume | bool)
+  tags: ["config"]
+
+- name: Check if external volume exists
+  stat:
+    path: "{{ external_volume }}"
+  register: external_volume_stat
+  when: (enable_external_volume | bool) and not skip_storage_setup
+  tags: ["config"]
+
+- name: Fail if external volume doesn't exist
+  fail:
+    msg: "External volume {{ external_volume }} does not exist. Set enable_external_volume: false to use local storage."
+  when: (enable_external_volume | bool) and not skip_storage_setup and not external_volume_stat.stat.exists
+  tags: ["config"]
+
+- name: Check if filesystem already exists
+  command: blkid "{{ external_volume }}"
+  register: filesystem_check
+  failed_when: false
+  changed_when: false
+  when: (enable_external_volume | bool) and not skip_storage_setup
+  tags: ["config"]
+
+- name: Create a xfs filesystem
+  filesystem:
+    fstype: "{{ filesystem }}"
+    dev: "{{ external_volume }}"
+    state: present
+    force: false
+  register: filesystem_creation
+  when: (enable_external_volume | bool) and not skip_storage_setup and filesystem_check.rc != 0
+  tags: ["config"]
+
+- name: Wait for filesystem to be recognized by system
+  pause:
+    seconds: 1
+  when: (enable_external_volume | bool) and not skip_storage_setup and filesystem_creation is defined and filesystem_creation.changed
+  tags: ["config"]
+
+- name: Flush filesystem changes to ensure UUID is available
+  command: partprobe "{{ external_volume }}"
+  ignore_errors: true
+  when: (enable_external_volume | bool) and not skip_storage_setup and filesystem_creation is defined and filesystem_creation.changed
+  tags: ["config"]
+
+- name: Getting UUID for external_volume "{{ external_volume }}"
+  shell: blkid -s UUID -o value "{{ external_volume }}"
+  register: UUID
+  failed_when: UUID.rc != 0
+  retries: 3
+  delay: 1
+  when: (enable_external_volume | bool) and not skip_storage_setup
+  tags: ["config"]
+
+- name: Mount up device by UUID
+  ansible.posix.mount:
+    path: "{{ mount_path }}"
+    src: "UUID={{ UUID.stdout }}"
+    fstype: "{{ filesystem }}"
+    opts: defaults
+    state: mounted
+  register: mount_result
+  when: (enable_external_volume | bool) and not skip_storage_setup
+  tags: ["config"]
+
+- name: Verify mount is successful
+  command: mountpoint -q "{{ mount_path }}"
+  register: mount_check
+  failed_when: mount_check.rc != 0
+  when: (enable_external_volume | bool) and not skip_storage_setup
+  tags: ["config"]
+
+- name: Display mount information
+  ansible.builtin.debug:
+    msg: "Successfully mounted {{ external_volume }} (UUID: {{ UUID.stdout }}) to {{ mount_path }}"
+  when: (enable_external_volume | bool) and not skip_storage_setup
+  tags: ["config"]
+
+- name: Display mount information for already mounted
+  ansible.builtin.debug:
+    msg: "Volume already mounted at {{ mount_path }}"
+  when: (enable_external_volume | bool) and skip_storage_setup
+  tags: ["config"]
+
+- name: Display local storage info (external volume disabled)
+  ansible.builtin.debug:
+    msg: "Using local storage at {{ mount_path }} (enable_external_volume: false)"
+  when: not (enable_external_volume | bool)
+  tags: ["config"]
+# ------- END EXTERNAL VOLUME SETUP -------
+
+- name: Check available disk space on mounted volume
+  command: df -h "{{ mount_path }}"
+  register: disk_space
+  changed_when: false
+  when: enable_external_volume | bool
+  tags: ["config"]
+
+- name: Display disk space information
+  debug:
+    var: disk_space.stdout_lines
+  when: enable_external_volume | bool
+  tags: ["config"]
+
+- name: Creating directories with proper ownership
+  file:
+    path: "{{ item }}"
+    state: directory
+    recurse: true
+    owner: "{{ owner }}"
+    group: "{{ group }}"
+    mode: '0755'
+  loop:
+    - "{{ dbPath }}"
+    - "{{ logDir }}"
+  tags: ["config"]
+
+- name: Check MongoDB service status
+  systemd:
+    name: mongod.service
+  register: mongod_service_status
+  tags: ["config"]
+
+- name: Ensure MongoDB service is stopped before configuration
+  systemd:
+    name: mongod.service
+    state: stopped
+  when: mongod_service_status.status.ActiveState == "active"
+  tags: ["config"]
+
+- name: Check if keyfile already exists
+  stat:
+    path: /tmp/mongo-keyfile
+  register: keyfile_exists
+  delegate_to: 127.0.0.1
+  run_once: true
+  become: true
+  when: not (standalone_mode | bool)
+  tags: ["config"]
+
+- name: Generate mongo keyfile on localhost
+  shell: openssl rand -base64 756 > /tmp/mongo-keyfile
+  delegate_to: 127.0.0.1
+  run_once: true
+  register: keyfile_creation
+  when: not (standalone_mode | bool) and not keyfile_exists.stat.exists
+  tags: ["config"]
+
+- name: Set proper permissions on keyfile (localhost)
+  file:
+    path: /tmp/mongo-keyfile
+    mode: '0755'
+  delegate_to: 127.0.0.1
+  run_once: true
+  when: not (standalone_mode | bool)
+  tags: ["config"]
+
+- name: Creating keyfile destination directory
+  file:
+    path: "{{ mongo_keyfile_dest }}"
+    state: directory
+    mode: '0755'
+    owner: "{{ owner }}"
+    group: "{{ group }}"
+  when: not (standalone_mode | bool)
+  tags: ["config"]
+
+- name: Copy keyfile with owner and permissions
+  copy:
+    src: /tmp/mongo-keyfile
+    dest: "{{ mongo_keyfile_dest }}/"
+    owner: "{{ owner }}"
+    group: "{{ group }}"
+    mode: '0400'
+  notify: restart mongod
+  when: not (standalone_mode | bool)
+  tags: ["config"]
+
+- name: Verify keyfile exists and has correct permissions
+  stat:
+    path: "{{ keyFile }}"
+  register: keyfile_stat
+  when: not (standalone_mode | bool)
+  tags: ["config"]
+
+- name: Fail if keyfile permissions are incorrect
+  fail:
+    msg: "Keyfile permissions are insecure: {{ keyfile_stat.stat.mode }}"
+  when: not (standalone_mode | bool) and keyfile_stat.stat.mode != '0400'
+  tags: ["config"]
+
+- name: Start and enable mongod service
+  systemd:
+    name: mongod.service
+    state: started
+    enabled: yes
+  tags: ["config"]
+  poll: 50
+  retries: 2
+  delay: 10
+
+- name: Wait for MongoDB to be ready
+  wait_for:
+    port: "{{ mongodb_port }}"
+    host: "{{ ansible_default_ipv4.address }}"
+    delay: 5
+    timeout: 50
+  tags: ["config"]
+
+- name: Notify about the completion of mongodb configuration
+  ansible.builtin.debug:
+    msg: "MongoDB configuration completed successfully on {{ inventory_hostname }}"
+  tags: ["config"]
+
+- name: Verify MongoDB version
+  shell: mongosh --version || mongo --version
+  register: mongod_version
+  changed_when: false
+  tags: ["config"]
+
+- debug:
+    var: mongod_version.stdout
+  tags: ["config"]
+
+- name: Notify about the MongoDB version
+  ansible.builtin.debug:
+    msg: "MongoDB version on {{ inventory_hostname }}: {{ mongod_version.stdout }}"
+  tags: ["config"]
+
+- name: Notify about the UUID of the external volume
+  ansible.builtin.debug:
+    msg: "UUID of the external volume {{ external_volume }} on {{ inventory_hostname }}: {{ UUID.stdout }}"
+  when: (enable_external_volume | bool) and not skip_storage_setup and UUID is defined
+  tags: ["config"]

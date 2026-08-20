@@ -1,0 +1,189 @@
+# Community MongoDB Primary-Secondary-Secondary Setup
+[primary]
+mongodb-primary ansible_host=10.21.33.10 ansible_port=22 ansible_user=ubuntu ansible_ssh_private_key_file=/path/to/key.pem
+
+[secondary]
+mongodb-secondary1 ansible_host=10.21.33.11 ansible_port=22 ansible_user=ubuntu ansible_ssh_private_key_file=/path/to/key.pem
+
+[secondary2]
+mongodb-secondary2 ansible_host=10.21.33.12 ansible_port=22 ansible_user=ubuntu ansible_ssh_private_key_file=/path/to/key.pem
+
+[mongodb:children]
+primary
+secondary
+secondary2
+
+[mongodb:vars]
+ansible_python_interpreter=/usr/bin/python3
+ansible_become=true
+ansible_become_method=sudo
+
+
+
+
+# Percona MongoDB Single Node Setup
+[percona_primary]
+percona-mongodb ansible_host=10.21.33.20 ansible_port=22 ansible_user=ubuntu ansible_ssh_private_key_file=/path/to/key.pem
+
+[percona]
+percona-mongodb
+
+[singlenode-cluster]
+percona-mongodb
+
+[mongodb:children]
+percona_primary
+percona
+
+[mongodb:vars]
+ansible_python_interpreter=/usr/bin/python3
+ansible_become=true
+ansible_become_method=sudo
+single_node_replicaset=true
+
+
+
+# Mixed MongoDB Environment
+[primary]
+mongodb-primary ansible_host=10.21.33.30 ansible_port=22 ansible_user=ubuntu ansible_ssh_private_key_file=/path/to/key.pem
+
+[secondary]
+mongodb-secondary ansible_host=10.21.33.31 ansible_port=22 ansible_user=ubuntu ansible_ssh_private_key_file=/path/to/key.pem
+
+[percona]
+percona-node ansible_host=10.21.33.32 ansible_port=22 ansible_user=ubuntu ansible_ssh_private_key_file=/path/to/key.pem
+
+[mongodb:children]
+primary
+secondary
+percona
+
+[mongodb:vars]
+ansible_python_interpreter=/usr/bin/python3
+ansible_become=true
+ansible_become_method=sudo
+
+
+# MongoDB with Arbiter Node
+[primary]
+mongodb-primary ansible_host=10.21.33.40 ansible_port=22 ansible_user=ubuntu ansible_ssh_private_key_file=/path/to/key.pem
+
+[secondary]
+mongodb-secondary ansible_host=10.21.33.41 ansible_port=22 ansible_user=ubuntu ansible_ssh_private_key_file=/path/to/key.pem
+
+[arbiter]
+mongodb-arbiter ansible_host=10.21.33.42 ansible_port=22 ansible_user=ubuntu ansible_ssh_private_key_file=/path/to/key.pem
+
+[mongodb:children]
+primary
+secondary
+arbiter
+
+[mongodb:vars]
+ansible_python_interpreter=/usr/bin/python3
+ansible_become=true
+ansible_become_method=sudo
+
+
+
+
+
+# Production Environment with Multiple Clusters
+[prod-primary]
+prod-mongodb-01 ansible_host=10.21.33.50 ansible_port=22 ansible_user=ubuntu ansible_ssh_private_key_file=/path/to/prod-key.pem
+
+[prod-secondary]
+prod-mongodb-02 ansible_host=10.21.33.51 ansible_port=22 ansible_user=ubuntu ansible_ssh_private_key_file=/path/to/prod-key.pem
+prod-mongodb-03 ansible_host=10.21.33.52 ansible_port=22 ansible_user=ubuntu ansible_ssh_private_key_file=/path/to/prod-key.pem
+
+[percona-prod]
+percona-prod-01 ansible_host=10.21.33.60 ansible_port=22 ansible_user=ubuntu ansible_ssh_private_key_file=/path/to/prod-key.pem
+
+# Staging Environment
+[staging-primary]
+staging-mongodb-01 ansible_host=10.21.34.50 ansible_port=22 ansible_user=ubuntu ansible_ssh_private_key_file=/path/to/staging-key.pem
+
+[staging-secondary]
+staging-mongodb-02 ansible_host=10.21.34.51 ansible_port=22 ansible_user=ubuntu ansible_ssh_private_key_file=/path/to/staging-key.pem
+
+# Group Definitions
+[primary:children]
+prod-primary
+staging-primary
+
+[secondary:children]
+prod-secondary
+staging-secondary
+
+[percona:children]
+percona-prod
+
+[mongodb:children]
+primary
+secondary
+percona
+
+[production:children]
+prod-primary
+prod-secondary
+percona-prod
+
+[staging:children]
+staging-primary
+staging-secondary
+
+[mongodb:vars]
+ansible_python_interpreter=/usr/bin/python3
+ansible_become=true
+ansible_become_method=sudo
+
+
+
+
+# 1. Community MongoDB 3-Node Setup
+ansible-playbook -i inventory.community mongodb-playbook.yml --tags "community-setup,replicaset-pss"
+
+# 2. Percona Single Node Setup
+ansible-playbook -i inventory.percona mongodb-playbook.yml --tags "percona-setup,single-node"
+
+# 3. Mixed Environment Setup
+ansible-playbook -i inventory.mixed mongodb-playbook.yml --tags "percona-setup,community-setup,replicaset-psp"
+
+# 4. Arbiter Setup
+ansible-playbook -i inventory.arbiter mongodb-playbook.yml --tags "community-setup,replicaset-arbiter"
+
+# 5. Security Only
+ansible-playbook -i inventory.production mongodb-playbook.yml --tags "security,users,authentication"
+
+# 6. Backup Setup Only
+ansible-playbook -i inventory.production mongodb-playbook.yml --tags "backup,percona-backup"
+
+# 7. Monitoring Setup
+ansible-playbook -i inventory.production mongodb-playbook.yml --tags "monitoring,node-exporter"
+
+# 8. Install Only (No Configuration)
+ansible-playbook -i inventory.production mongodb-playbook.yml --tags "install,dependencies"
+
+# 9. Configuration Only (Post Install)
+ansible-playbook -i inventory.production mongodb-playbook.yml --tags "config,storage,network"
+
+# 10. Validation and Testing
+ansible-playbook -i inventory.production mongodb-playbook.yml --tags "validation,testing"
+
+
+
+# Skip backup and monitoring
+ansible-playbook -i inventory.production mongodb-playbook.yml --skip-tags "backup,monitoring"
+
+# Only replication setup
+ansible-playbook -i inventory.production mongodb-playbook.yml --tags "replication"
+
+# Only user management
+ansible-playbook -i inventory.production mongodb-playbook.yml --tags "users,admin-user"
+
+# Maintenance tasks only
+ansible-playbook -i inventory.production mongodb-playbook.yml --tags "maintenance,logrotate"
+
+
+
+
