@@ -28,11 +28,55 @@ A multi-user web dashboard for MongoDB cluster lifecycle management. Replaces ma
    docker compose up -d
    ```
 
-4. **Access Dashboard**:
+4. **Access Dashboard & CLI Utility**:
    - Web Console: `http://localhost`
    - API Docs: `http://localhost:8000/api/docs`
+   - CLI Utility:
+     ```bash
+     cd backend
+     uv sync
+     uv run mgops login --url http://localhost:8000
+     uv run mgops status
+     ```
 
 For details on contributing, security policy, and licensing, see [CONTRIBUTING.md](CONTRIBUTING.md), [SECURITY.md](SECURITY.md), and [LICENSE](LICENSE).
+
+---
+
+## 💻 `mgops` CLI Utility
+
+MongoDB Ops Console includes a dedicated command-line interface `mgops` built with **Typer**, **Rich**, and **HTTPX**.
+
+### Common CLI Commands
+
+```bash
+# Authentication & Status
+mgops login --username admin --password admin
+mgops status
+mgops whoami
+
+# Cluster & Host Management
+mgops clusters list
+mgops clusters get <cluster_id>
+mgops clusters hosts <cluster_id>
+
+# Real-time Log Streaming
+mgops logs show <job_id> --follow
+
+# Day-2 Operations
+mgops ops restart-node --cluster-id <id> --hostname mongo-primary-1
+mgops ops rolling-restart --cluster-id <id>
+mgops ops backup --cluster-id <id>
+mgops ops create-user --cluster-id <id> --username appuser --password secret --db appdb
+
+# Alerts & Audit Logs
+mgops alerts list --unresolved
+mgops audit list --limit 10
+
+# Output Formatting for Scripting & CI/CD
+mgops clusters list --output json | jq .
+mgops status --output yaml
+```
 
 ---
 
